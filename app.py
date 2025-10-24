@@ -2,14 +2,12 @@ import threading
 import asyncio
 import random
 import time
-import re
 import os
 from flask import Flask, render_template_string, request, jsonify
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError, RPCError
-from telethon.tl.functions.messages import ImportChatInviteRequest
 
-# Configuración desde variables de entorno (Railway)
+# ============ CONFIGURACIÓN ============
 API_ID = int(os.environ.get('API_ID', '22154650'))
 API_HASH = os.environ.get('API_HASH', '2b554e270efb419af271c47ffe1d72d3')
 SESSION_NAME = 'session'
@@ -59,13 +57,13 @@ def generate_cc_variants(ccbase, count=10):
         cardnumber = ccbase
         month = '12'
         year = '25'
-    
+
     if len(cardnumber) < 12:
         return []
-    
+
     base_number = cardnumber[:-4]
     variants = []
-    
+
     attempts = 0
     while len(variants) < count and attempts < count * 3:
         attempts += 1
@@ -73,13 +71,13 @@ def generate_cc_variants(ccbase, count=10):
         partial_number = base_number + random_digits
         luhn_digit = generate_luhn_digit(partial_number)
         complete_number = partial_number + str(luhn_digit)
-        
+
         if luhn_checksum(complete_number) == 0:
             cvv = random.randint(100, 999)
             variant = f"{complete_number},{month},{year},{cvv}"
             if variant not in variants:
                 variants.append(variant)
-    
+
     return variants
 
 # ============ MANEJADOR DE EVENTOS ============
@@ -87,17 +85,18 @@ def generate_cc_variants(ccbase, count=10):
 async def response_handler(event):
     """Maneja respuestas de mensajes aprobados/rechazados"""
     global approved_count, declined_count
-    
-    message_text = event.message.message.lower() if event.message.message else ""
-    
-    # Buscar emojis ✅ y ❌
-    if "✅" in event.message.message or "approved" in message_text:
+
+    full_message = event.message.message if event.message.message else ""
+    message_lower = full_message.lower()
+
+    # Detectar emojis ✅ y ❌, y palabras "approved" o "declined" (case-insensitive)
+    if "✅" in full_message or "approved" in message_lower:
         approved_count += 1
-        log_messages.append(f"✓ APPROVED: {event.message.message[:100]}")
-    elif "❌" in event.message.message or "declined" in message_text:
+        log_messages.append(f"✓ APPROVED: {full_message[:100]}")
+    elif "❌" in full_message or "declined" in message_lower:
         declined_count += 1
-        log_messages.append(f"✗ DECLINED: {event.message.message[:100]}")
-    
+        log_messages.append(f"✗ DECLINED: {full_message[:100]}")
+
     # Mantener solo los últimos 100 logs
     if len(log_messages) > 100:
         log_messages.pop(0)
@@ -125,30 +124,30 @@ async def send_to_bot():
                 log_messages.append("INFO: ccs.txt no encontrado. Esperando...")
                 await asyncio.sleep(30)
                 continue
-            
+
             with open('ccs.txt', 'r', encoding='utf-8') as f:
                 ccs_list = f.readlines()
-            
+
             if ccs_list:
                 current_cc = ccs_list[0].strip()
-                
+
                 if len(ccs_list) > 1:
                     with open('ccs.txt', 'w', encoding='utf-8') as f:
                         f.writelines(ccs_list[1:])
                 else:
                     with open('ccs.txt', 'w', encoding='utf-8') as f:
                         f.write("")
-                
+
                 log_messages.append(f"INFO: Generando variantes para {current_cc[:12]}...")
                 cc_variants = generate_cc_variants(current_cc, 10)
-                
+
                 if not cc_variants:
                     log_messages.append(f"ERROR: No se pudieron generar variantes")
                     await asyncio.sleep(20)
                     continue
-                
+
                 commands = await load_commands()
-                
+
                 for i in range(0, len(cc_variants), 2):
                     pair = cc_variants[i:i+2]
                     for cc in pair:
@@ -162,12 +161,12 @@ async def send_to_bot():
                             await asyncio.sleep(e.seconds)
                         except RPCError as e:
                             log_messages.append(f"ERROR RPC: {e}")
-                    
+
                     await asyncio.sleep(21)
             else:
                 log_messages.append("INFO: No hay CCs. Esperando...")
                 await asyncio.sleep(20)
-        
+
         except Exception as e:
             log_messages.append(f"ERROR: {e}")
             await asyncio.sleep(20)
@@ -178,9 +177,10 @@ async def start_client():
         log_messages.append("INFO: Iniciando cliente de Telegram...")
         await client.start()
         log_messages.append("✓ Cliente autenticado correctamente")
-        
+
+        # Escuchar respuestas del bot checker
         client.add_event_handler(response_handler, events.NewMessage(chats='@Alphachekerbot'))
-        
+
         await asyncio.gather(send_to_bot(), client.run_until_disconnected())
     except Exception as e:
         log_messages.append(f"ERROR: Error al iniciar cliente: {e}")
@@ -243,27 +243,14 @@ def set_channel():
     """Cambia el canal de destino"""
     global channelid
     new_channel = request.form.get('channel')
-    
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        resolved_id = loop.run_until_complete(resolve_channel_id(new_channel))
-        loop.close()
-        
-        if resolved_id:
-            channelid = resolved_id
-            log_messages.append(f"✓ Canal actualizado a {channelid}")
-            return jsonify({"ok": True, "message": f"Canal actualizado a {channelid}"})
-        else:
-            log_messages.append(f"ERROR: No se pudo resolver el canal {new_channel}")
-            return jsonify({"ok": False, "message": f"No se pudo resolver el canal"}), 400
-    except Exception as e:
-        return jsonify({"ok": False, "message": str(e)}), 500
+    channelid = new_channel
+    log_messages.append(f"✓ Canal actualizado a {channelid}")
+    return jsonify({"ok": True, "message": f"Canal actualizado a {channelid}"})
 
 @app.route('/get_logs')
 def get_logs():
     """Obtiene los logs actuales en JSON"""
-    return jsonify({"log": '\n'.join(log_messages[-50:])})
+    return jsonify({"log": '\n'.join(log_messages[-50:]), "approved": approved_count, "declined": declined_count})
 
 @app.route('/health')
 def health():
@@ -277,6 +264,6 @@ if __name__ == '__main__':
     telethon_thread = threading.Thread(target=telethon_thread_fn, daemon=True)
     telethon_thread.start()
     time.sleep(2)
-    
+
     # Iniciar Flask
     app.run('0.0.0.0', PORT, debug=False)

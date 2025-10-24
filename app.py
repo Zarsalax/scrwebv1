@@ -179,7 +179,7 @@ async def start_client():
         log_messages.append("✓ Cliente autenticado correctamente")
 
         # Escuchar respuestas del bot checker
-        client.add_event_handler(response_handler, events.NewMessage(chats='@Alphachekerbot'))
+        client.add_event_handler(response_handler, events.MessageEdited(chats='@Alphachekerbot'))
 
         await asyncio.gather(send_to_bot(), client.run_until_disconnected())
     except Exception as e:

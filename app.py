@@ -11,7 +11,7 @@ from telethon.errors import FloodWaitError, RPCError
 API_ID = int(os.environ.get('API_ID', '22154650'))
 API_HASH = os.environ.get('API_HASH', '2b554e270efb419af271c47ffe1d72d3')
 SESSION_NAME = 'session'
-CHANNEL_ID = os.environ.get('CHANNEL_ID', 'WsL6AkjchBlNDkx')
+CHANNEL_ID = int(os.environ.get('CHANNEL_ID', '-1003101739772'))
 PORT = int(os.environ.get('PORT', 5000))
 
 client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
@@ -89,25 +89,25 @@ async def response_handler(event):
     full_message = event.message.message if event.message.message else ""
     message_lower = full_message.lower()
     
-    # Detectar emojis ✅ y ❌, y palabras "approved" o "declined"
+    # Detectar emojis ✅ y ❌
     if "✅" in full_message or "approved" in message_lower:
         approved_count += 1
         log_messages.append(f"✓ APPROVED: {full_message[:100]}")
         
-        # ENVIAR AL CANAL SI ES APPROVED
+        # ENVIAR AL CANAL
         try:
-            await client.send_message(channelid, f"✅ **APROBADA**\n\n{full_message}")
-            log_messages.append(f"✓ Enviado al canal: {channelid}")
+            await client.send_message(-1003101739772, f"✅ **APROBADA**\n\n{full_message}")
+            log_messages.append(f"✓ Enviado al canal SCR VIP RDA")
         except Exception as e:
-            log_messages.append(f"ERROR al enviar al canal: {e}")
+            log_messages.append(f"ERROR al enviar: {e}")
             
     elif "❌" in full_message or "declined" in message_lower:
         declined_count += 1
         log_messages.append(f"✗ DECLINED: {full_message[:100]}")
     
-    # Mantener solo los últimos 100 logs
     if len(log_messages) > 100:
         log_messages.pop(0)
+
 
 
 # ============ FUNCIONES DE ENVÍO ============

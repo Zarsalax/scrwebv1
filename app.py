@@ -84,22 +84,31 @@ def generate_cc_variants(ccbase, count=10):
 
 async def response_handler(event):
     """Maneja respuestas de mensajes aprobados/rechazados"""
-    global approved_count, declined_count
-
+    global approved_count, declined_count, channelid
+    
     full_message = event.message.message if event.message.message else ""
     message_lower = full_message.lower()
-
-    # Detectar emojis ✅ y ❌, y palabras "approved" o "declined" (case-insensitive)
+    
+    # Detectar emojis ✅ y ❌, y palabras "approved" o "declined"
     if "✅" in full_message or "approved" in message_lower:
         approved_count += 1
         log_messages.append(f"✓ APPROVED: {full_message[:100]}")
+        
+        # ENVIAR AL CANAL SI ES APPROVED
+        try:
+            await client.send_message(channelid, f"✅ **APROBADA**\n\n{full_message}")
+            log_messages.append(f"✓ Enviado al canal: {channelid}")
+        except Exception as e:
+            log_messages.append(f"ERROR al enviar al canal: {e}")
+            
     elif "❌" in full_message or "declined" in message_lower:
         declined_count += 1
         log_messages.append(f"✗ DECLINED: {full_message[:100]}")
-
+    
     # Mantener solo los últimos 100 logs
     if len(log_messages) > 100:
         log_messages.pop(0)
+
 
 # ============ FUNCIONES DE ENVÍO ============
 

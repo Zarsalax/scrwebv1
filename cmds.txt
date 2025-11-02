@@ -20,3 +20,12 @@
 /shy
 /mk
 /hid
+/pb3
+/pf
+/us
+/sp
+/shy
+/mk
+/hid
+/dr
+/bm

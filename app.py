@@ -37,6 +37,7 @@ approved_count = 0
 declined_count = 0
 total_sent = 0
 channelid = -1003101739772
+client_connected = False
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
@@ -468,9 +469,13 @@ async def load_commands():
     return ['/check']
 
 async def send_to_bot():
-    global total_sent
+    global total_sent, client_connected
     while True:
         try:
+            if not client_connected:
+                await asyncio.sleep(5)
+                continue
+            
             if not os.path.exists('ccs.txt'):
                 await asyncio.sleep(30)
                 continue
@@ -517,8 +522,8 @@ async def send_to_bot():
                                 await client.send_message('@Alphachekerbot', msg)
                                 num = i + idx + 1
                                 log_messages.append(f"✓ #{num}/20")
-                            except:
-                                pass
+                            except Exception as e:
+                                log_messages.append(f"❌ Error enviando: {str(e)[:30]}")
                         
                         tasks.append(send_cc(message, j))
                     
@@ -530,17 +535,26 @@ async def send_to_bot():
             else:
                 await asyncio.sleep(20)
         except Exception as e:
+            log_messages.append(f"❌ Error send_to_bot: {str(e)[:50]}")
             await asyncio.sleep(20)
 
 async def start_client():
+    global client_connected
     try:
         log_messages.append("🚀 Bot iniciando...")
+        print("🚀 Iniciando Telethon...")
         await client.start()
+        client_connected = True
         log_messages.append("✅ Bot conectado")
+        print("✅ Telethon conectado")
         client.add_event_handler(response_handler, events.MessageEdited(chats='@Alphachekerbot'))
         await asyncio.gather(send_to_bot(), client.run_until_disconnected())
     except Exception as e:
-        log_messages.append(f"❌ Error")
+        client_connected = False
+        error_msg = str(e)[:100]
+        log_messages.append(f"❌ Error: {error_msg}")
+        print(f"❌ Error Telethon: {error_msg}")
+        await asyncio.sleep(5)
 
 def telethon_thread_fn():
     loop = asyncio.new_event_loop()
@@ -597,7 +611,7 @@ def login():
         except:
             return jsonify({'error': 'Error servidor'}), 500
     
-    html = '''<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>🔐 SCRAPPER</title><style>*{margin:0;padding:0;box-sizing:border-box}html{scroll-behavior:smooth}body{background:linear-gradient(135deg,#0a0e27 0%,#1a1a3e 30%,#2d1b3d 60%,#0a0e27 100%);font-family:'Segoe UI',Tahoma,Geneva,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative}body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:radial-gradient(circle at 20% 50%, rgba(255,20,20,0.15) 0%, transparent 40%),radial-gradient(circle at 80% 80%, rgba(20,20,255,0.15) 0%, transparent 40%),radial-gradient(circle at 50% 0%, rgba(255,170,0,0.08) 0%, transparent 50%);pointer-events:none;z-index:0;animation:float 20s ease-in-out infinite}body::after{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ff1414' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");pointer-events:none;z-index:0;opacity:0.5}@keyframes float{0%,100%{transform:translateY(0px)}50%{transform:translateY(20px)}}.login-container{background:rgba(255,20,20,0.07);border:3px solid #ff1414;border-radius:30px;padding:70px 60px;width:100%;max-width:480px;box-shadow:0 0 100px rgba(255,20,20,0.3),inset 0 0 30px rgba(255,20,20,0.1);backdrop-filter:blur(20px);position:relative;z-index:10;animation:slideUp 0.8s cubic-bezier(0.34,1.56,0.64,1);transform:perspective(1000px) rotateX(0deg)}.login-container h1{color:#ff1414;margin-bottom:15px;text-align:center;font-size:3em;text-shadow:0 0 30px rgba(255,20,20,0.8),0 0 60px rgba(255,20,20,0.4);letter-spacing:3px;font-weight:900}.login-container p{color:#ffaa00;text-align:center;margin-bottom:35px;font-size:1em;opacity:0.95;letter-spacing:1px;text-transform:uppercase}.form-group{margin-bottom:30px;position:relative}.form-group label{display:block;color:#ffaa00;margin-bottom:12px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;font-size:0.95em}.form-group input{width:100%;padding:16px 20px;background:rgba(0,0,0,0.4);border:2px solid #ff1414;border-radius:12px;color:#fff;font-size:1.05em;transition:all 0.4s cubic-bezier(0.34,1.56,0.64,1);font-weight:500;box-shadow:inset 0 2px 8px rgba(0,0,0,0.3)}.form-group input:focus{outline:none;border-color:#ffaa00;box-shadow:0 0 30px rgba(255,170,0,0.6),inset 0 2px 8px rgba(0,0,0,0.3);background:rgba(0,0,0,0.5);transform:translateY(-2px)}.form-group input::placeholder{color:#ff741450}.login-btn{width:100%;padding:16px;background:linear-gradient(135deg,#ff1414 0%,#cc0000 50%,#ff1414 100%);background-size:200% 200%;border:3px solid #ffaa00;border-radius:12px;color:white;font-weight:900;font-size:1.15em;cursor:pointer;text-transform:uppercase;transition:all 0.4s cubic-bezier(0.34,1.56,0.64,1);box-shadow:0 8px 30px rgba(255,20,20,0.5),inset 0 -2px 5px rgba(0,0,0,0.3);letter-spacing:2px}.login-btn:hover{transform:translateY(-3px);box-shadow:0 12px 50px rgba(255,20,20,0.7),inset 0 -2px 5px rgba(0,0,0,0.3);background-position:200% 0}.login-btn:active{transform:translateY(-1px);box-shadow:0 5px 20px rgba(255,20,20,0.5)}.error-message{color:#ff6b6b;text-align:center;margin-bottom:20px;font-weight:700;font-size:1em;padding:15px;background:rgba(255,20,20,0.15);border-left:4px solid #ff1414;border-radius:8px;display:none;animation:slideDown 0.4s ease-out}.loading{display:inline-block;width:4px;height:4px;border-radius:50%;background:#ffaa00;margin-left:5px;animation:blink 1.4s infinite}@keyframes slideUp{from{opacity:0;transform:translateY(40px) rotateX(-20deg)}to{opacity:1;transform:translateY(0) rotateX(0deg)}}@keyframes slideDown{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}@keyframes blink{0%,20%,50%,80%,100%{opacity:0}40%{opacity:1}}</style></head><body><div class="login-container"><h1>🔐 SCRAPPER</h1><p>Team RedCards 💎 VIP ACCESS</p><div id="error-msg" class="error-message"></div><form id="login-form"><div class="form-group"><label>👤 Usuario</label><input type="text" name="username" id="username" placeholder="Ingresa tu usuario" required autocomplete="off"></div><div class="form-group"><label>🔑 Contraseña</label><input type="password" name="password" id="password" placeholder="Ingresa tu contraseña" required autocomplete="off"></div><button type="submit" class="login-btn">🚀 ENTRAR<span class="loading" id="loading"></span></button></form></div><script>document.getElementById('login-form').addEventListener('submit',function(e){e.preventDefault();const err=document.getElementById('error-msg');const btn=document.querySelector('.login-btn');err.style.display='none';btn.disabled=true;fetch('/login',{method:'POST',body:new FormData(this)}).then(r=>r.json()).then(d=>{if(d.success)window.location.href=d.redirect;else{err.textContent='❌ '+d.error;err.style.display='block';btn.disabled=false;}}).catch(e=>{btn.disabled=false;});});</script></body></html>'''
+    html = '''<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>🔐 SCRAPPER</title><style>*{margin:0;padding:0;box-sizing:border-box}html{scroll-behavior:smooth}body{background:linear-gradient(135deg,#0a0e27 0%,#1a1a3e 30%,#2d1b3d 60%,#0a0e27 100%);font-family:'Segoe UI',Tahoma,Geneva,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative}body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:radial-gradient(circle at 20% 50%, rgba(255,20,20,0.15) 0%, transparent 40%),radial-gradient(circle at 80% 80%, rgba(20,20,255,0.15) 0%, transparent 40%),radial-gradient(circle at 50% 0%, rgba(255,170,0,0.08) 0%, transparent 50%);pointer-events:none;z-index:0;animation:float 20s ease-in-out infinite}body::after{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ff1414' fill-opacity='0.03'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");pointer-events:none;z-index:0;opacity:0.5}.login-container{background:rgba(255,20,20,0.07);border:3px solid #ff1414;border-radius:30px;padding:70px 60px;width:100%;max-width:480px;box-shadow:0 0 100px rgba(255,20,20,0.3),inset 0 0 30px rgba(255,20,20,0.1);backdrop-filter:blur(20px);position:relative;z-index:10;animation:slideUp 0.8s cubic-bezier(0.34,1.56,0.64,1);transform:perspective(1000px) rotateX(0deg)}.login-container h1{color:#ff1414;margin-bottom:15px;text-align:center;font-size:3em;text-shadow:0 0 30px rgba(255,20,20,0.8),0 0 60px rgba(255,20,20,0.4);letter-spacing:3px;font-weight:900}.login-container p{color:#ffaa00;text-align:center;margin-bottom:35px;font-size:1em;opacity:0.95;letter-spacing:1px;text-transform:uppercase}.form-group{margin-bottom:30px;position:relative}.form-group label{display:block;color:#ffaa00;margin-bottom:12px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;font-size:0.95em}.form-group input{width:100%;padding:16px 20px;background:rgba(0,0,0,0.4);border:2px solid #ff1414;border-radius:12px;color:#fff;font-size:1.05em;transition:all 0.4s cubic-bezier(0.34,1.56,0.64,1);font-weight:500;box-shadow:inset 0 2px 8px rgba(0,0,0,0.3)}.form-group input:focus{outline:none;border-color:#ffaa00;box-shadow:0 0 30px rgba(255,170,0,0.6),inset 0 2px 8px rgba(0,0,0,0.3);background:rgba(0,0,0,0.5);transform:translateY(-2px)}.form-group input::placeholder{color:#ff741450}.login-btn{width:100%;padding:16px;background:linear-gradient(135deg,#ff1414 0%,#cc0000 50%,#ff1414 100%);background-size:200% 200%;border:3px solid #ffaa00;border-radius:12px;color:white;font-weight:900;font-size:1.15em;cursor:pointer;text-transform:uppercase;transition:all 0.4s cubic-bezier(0.34,1.56,0.64,1);box-shadow:0 8px 30px rgba(255,20,20,0.5),inset 0 -2px 5px rgba(0,0,0,0.3);letter-spacing:2px}.login-btn:hover{transform:translateY(-3px);box-shadow:0 12px 50px rgba(255,20,20,0.7),inset 0 -2px 5px rgba(0,0,0,0.3);background-position:200% 0}.login-btn:active{transform:translateY(-1px);box-shadow:0 5px 20px rgba(255,20,20,0.5)}.error-message{color:#ff6b6b;text-align:center;margin-bottom:20px;font-weight:700;font-size:1em;padding:15px;background:rgba(255,20,20,0.15);border-left:4px solid #ff1414;border-radius:8px;display:none;animation:slideDown 0.4s ease-out}.loading{display:inline-block;width:4px;height:4px;border-radius:50%;background:#ffaa00;margin-left:5px;animation:blink 1.4s infinite}@keyframes slideUp{from{opacity:0;transform:translateY(40px) rotateX(-20deg)}to{opacity:1;transform:translateY(0) rotateX(0deg)}}@keyframes slideDown{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}@keyframes blink{0%,20%,50%,80%,100%{opacity:0}40%{opacity:1}}@keyframes float{0%,100%{transform:translateY(0px)}50%{transform:translateY(20px)}}</style></head><body><div class="login-container"><h1>🔐 SCRAPPER</h1><p>Team RedCards 💎 VIP ACCESS</p><div id="error-msg" class="error-message"></div><form id="login-form"><div class="form-group"><label>👤 Usuario</label><input type="text" name="username" id="username" placeholder="Ingresa tu usuario" required autocomplete="off"></div><div class="form-group"><label>🔑 Contraseña</label><input type="password" name="password" id="password" placeholder="Ingresa tu contraseña" required autocomplete="off"></div><button type="submit" class="login-btn">🚀 ENTRAR<span class="loading" id="loading"></span></button></form></div><script>document.getElementById('login-form').addEventListener('submit',function(e){e.preventDefault();const err=document.getElementById('error-msg');const btn=document.querySelector('.login-btn');err.style.display='none';btn.disabled=true;fetch('/login',{method:'POST',body:new FormData(this)}).then(r=>r.json()).then(d=>{if(d.success)window.location.href=d.redirect;else{err.textContent='❌ '+d.error;err.style.display='block';btn.disabled=false;}}).catch(e=>{btn.disabled=false;});});</script></body></html>'''
     return render_template_string(html)
 
 @app.route('/dashboard')
@@ -747,13 +761,13 @@ def get_responses():
 
 @app.route('/health')
 def health():
-    return jsonify({"status": "ok"})
+    return jsonify({"status": "ok", "telethon": "connected" if client_connected else "disconnected"})
 
 # ============ MAIN ============
 
 if __name__ == '__main__':
     print(f"\n{'='*120}")
-    print(f"🚀 SCRAPPER TEAM REDCARDS v4.0 - MEGA BRUTAL 150K+ BYTES")
+    print(f"🚀 SCRAPPER TEAM REDCARDS v4.1 - FIXED SEND CCS")
     print(f"{'='*120}\n")
     
     init_db()
@@ -766,10 +780,11 @@ if __name__ == '__main__':
     
     telethon_thread = threading.Thread(target=telethon_thread_fn, daemon=True)
     telethon_thread.start()
-    time.sleep(2)
+    time.sleep(3)
     
     print(f"{'='*120}")
     print(f"🌐 Flask corriendo en http://0.0.0.0:{PORT}")
+    print(f"🔗 Telethon status: Iniciando conexión...")
     print(f"{'='*120}\n")
     
-    app.run('0.0.0.0', PORT, debug=False)
+    app.run('0.0.0.0', PORT, debug=False, use_reloader=False)

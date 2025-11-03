@@ -190,14 +190,6 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-def owner_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'owner_authenticated' not in session or not session['owner_authenticated']:
-            return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    return decorated_function
-
 # ============ FUNCIONES UTILITARIAS ============
 
 def luhn_checksum(card_number):
@@ -541,19 +533,29 @@ def owner_login(secret_url):
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
         
-        if username == owner_config['username'] and password == owner_config['password']:
-            session['owner_authenticated'] = True
-            session['owner_secret_url'] = secret_url
-            return jsonify({'success': True, 'redirect': url_for('owner_panel', secret_url=secret_url)})
-        else:
-            return jsonify({'error': 'Credenciales INCORRECTAS'}), 401
+        # VERIFICACIÓN DIRECTA Y SIMPLE - SIN COMPLICACIONES
+        if username != owner_config.get('username'):
+            return jsonify({'error': 'Usuario INCORRECTO'}), 401
+        
+        if password != owner_config.get('password'):
+            return jsonify({'error': 'Contraseña INCORRECTA'}), 401
+        
+        # SI LLEGÓ AQUÍ, LAS CREDENCIALES SON CORRECTAS
+        session['owner_authenticated'] = True
+        session['owner_secret_url'] = secret_url
+        session.permanent = True
+        
+        return jsonify({'success': True, 'redirect': url_for('owner_panel', secret_url=secret_url)})
     
     html = '''<!DOCTYPE html><html><head><meta charset="UTF-8"><title>🔐 OWNER ACCESS</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:linear-gradient(135deg,#0a0e27 0%,#1a1a3e 50%,#2d1b3d 100%);font-family:Arial,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center}.login-container{background:rgba(20,20,255,0.08);border:3px solid #1414ff;border-radius:20px;padding:50px;width:100%;max-width:400px;box-shadow:0 0 40px rgba(20,20,255,0.6)}.login-container h1{color:#00aaff;margin-bottom:30px;text-align:center;font-size:2em;text-shadow:0 0 15px rgba(0,170,255,0.6)}.form-group{margin-bottom:20px}.form-group label{display:block;color:#00aaff;margin-bottom:8px;font-weight:bold}.form-group input{width:100%;padding:12px;background:rgba(0,0,0,0.3);border:2px solid #1414ff;border-radius:8px;color:#fff}.form-group input:focus{outline:none;border-color:#00aaff;box-shadow:0 0 15px rgba(0,170,255,0.5)}.login-btn{width:100%;padding:12px;background:linear-gradient(135deg,#1414ff 0%,#0000cc 100%);border:2px solid #00aaff;border-radius:8px;color:white;font-weight:bold;cursor:pointer;text-transform:uppercase}.login-btn:hover{transform:scale(1.05)}.error-message{color:#ff6b6b;text-align:center;margin-bottom:20px}</style></head><body><div class="login-container"><h1>🔐 OWNER PANEL</h1><div id="error-msg" class="error-message"></div><form id="login-form"><div class="form-group"><label>👤 Usuario</label><input type="text" id="username" required></div><div class="form-group"><label>🔑 Contraseña</label><input type="password" id="password" required></div><button type="submit" class="login-btn">⚙️ ACCESO OWNER</button></form></div><script>document.getElementById('login-form').addEventListener('submit',function(e){e.preventDefault();fetch('',{method:'POST',body:new FormData(this)}).then(r=>r.json()).then(d=>{if(d.success)window.location.href=d.redirect;else document.getElementById('error-msg').textContent=d.error;});});</script></body></html>'''
     return render_template_string(html)
 
 @app.route('/secret/<secret_url>/owner_panel')
-@owner_required
 def owner_panel(secret_url):
+    # VERIFICAR SESIÓN Y SECRET_URL
+    if 'owner_authenticated' not in session or session.get('owner_secret_url') != secret_url:
+        return redirect(url_for('owner_login', secret_url=secret_url))
+    
     owner_config = get_owner_config()
     if not owner_config or secret_url != owner_config.get('secret_url'):
         return "NOT FOUND", 404
@@ -578,8 +580,10 @@ def owner_logout(secret_url):
 # ============ APIs OWNER ============
 
 @app.route('/api/owner/users/create', methods=['POST'])
-@owner_required
 def owner_api_create():
+    if 'owner_authenticated' not in session:
+        return jsonify({'error': 'No autenticado'}), 401
+    
     data = request.get_json()
     username = data.get('username', '').strip()
     email = data.get('email', '').strip()
@@ -601,8 +605,10 @@ def owner_api_create():
         return jsonify({'error': 'Usuario o email existe'}), 400
 
 @app.route('/api/owner/users/delete/<int:user_id>', methods=['POST'])
-@owner_required
 def owner_api_delete(user_id):
+    if 'owner_authenticated' not in session:
+        return jsonify({'error': 'No autenticado'}), 401
+    
     try:
         conn = get_db()
         c = conn.cursor()
@@ -614,8 +620,10 @@ def owner_api_delete(user_id):
         return jsonify({'error': 'Error'}), 400
 
 @app.route('/api/owner/users/toggle/<int:user_id>', methods=['POST'])
-@owner_required
 def owner_api_toggle(user_id):
+    if 'owner_authenticated' not in session:
+        return jsonify({'error': 'No autenticado'}), 401
+    
     try:
         conn = get_db()
         c = conn.cursor()
@@ -630,8 +638,10 @@ def owner_api_toggle(user_id):
         return jsonify({'error': 'Error'}), 400
 
 @app.route('/api/owner/users/edit/<int:user_id>', methods=['POST'])
-@owner_required
 def owner_api_edit(user_id):
+    if 'owner_authenticated' not in session:
+        return jsonify({'error': 'No autenticado'}), 401
+    
     data = request.get_json()
     password = data.get('password', '')
     

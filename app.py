@@ -37,20 +37,16 @@ def get_current_date():
     now = datetime.now()
     return f"{now.month:02d}/{now.year % 100:02d}"
 
-def is_date_valid(month_year):
+def is_date_valid(month, year):
     """Verifica si una fecha MM/YY es válida (no está vencida)"""
     try:
-        parts = month_year.split('/')
-        if len(parts) != 2:
-            return False
-        
-        month = int(parts[0])
-        year = int(parts[1])
+        month = int(month)
+        year = int(year)
         
         # Convertir a año completo (00-30 = 2000-2030, 31-99 = 1931-1999)
         if year <= 30:
             year += 2000
-        else:
+        elif year <= 99:
             year += 1900
         
         # Crear fecha del último día del mes
@@ -70,36 +66,26 @@ def generate_random_valid_date():
     # Generar fecha entre hoy y 5 años en el futuro
     days_ahead = random.randint(0, 365 * 5)
     future_date = now + timedelta(days=days_ahead)
-    return f"{future_date.month:02d}/{future_date.year % 100:02d}"
-
-def luhn_checksum(cardnumber):
-    """Algoritmo de Luhn para validar tarjetas"""
-    digits = [int(d) for d in str(cardnumber)]
-    odd = digits[-1::-2]
-    even = digits[-2::-2]
-    checksum = sum(odd)
-    for d in even:
-        checksum += sum([int(x) for x in str(d * 2)])
-    return checksum % 10
-
-def generate_luhn_digit(partial_cardnumber):
-    """Genera un dígito de verificación válido según Luhn"""
-    checksum = 0
-    for i, digit in enumerate(reversed(partial_cardnumber)):
-        d = int(digit)
-        if i % 2 == 0:
-            checksum += d
-        else:
-            checksum += sum([int(x) for x in str(d * 2)])
-    return (10 - (checksum % 10)) % 10
+    month = f"{future_date.month:02d}"
+    year = f"{future_date.year}"
+    return month, year
 
 def generate_cc_variants(ccbase, count=20):
     """
-    Genera 20 variantes de tarjetas con todos los datos validados
-    - Si la fecha es vencida, genera una nueva válida
-    - Si la fecha NO es válida, quita 5 dígitos de la tarjeta
+    Genera 20 variantes de tarjetas SIN algoritmo de Luhn
+    - Si la fecha es vencida: genera nueva fecha válida y QUITA los últimos 5-6 dígitos
+    - Si la fecha es válida: cambia solo los 4 últimos dígitos
     """
-    parts = ccbase.strip().split('|')
+    # Detectar separador (coma o pipe)
+    if ',' in ccbase:
+        separator = ','
+    elif '|' in ccbase:
+        separator = '|'
+    else:
+        log_messages.append(f"ERROR: Formato desconocido: {ccbase}")
+        return []
+    
+    parts = ccbase.strip().split(separator)
     
     # Parsear datos originales
     if len(parts) >= 4:
@@ -117,48 +103,53 @@ def generate_cc_variants(ccbase, count=20):
         return []
     
     # Verificar si la fecha es válida
-    date_str = f"{month}/{year}"
-    is_valid_date = is_date_valid(date_str)
+    date_is_valid = is_date_valid(month, year)
     
-    # Si la fecha NO es válida, generar una nueva
-    if not is_valid_date:
-        log_messages.append(f"⚠️ Fecha vencida detectada: {date_str}. Generando nueva fecha...")
-        new_date = generate_random_valid_date()
-        month = new_date.split('/')[0]
-        year = new_date.split('/')[1]
-        date_str = f"{month}/{year}"
-    
-    base_number = cardnumber[:-4]
     variants = []
-    attempts = 0
     
-    # Generar 20 variantes
-    while len(variants) < count and attempts < count * 5:
-        attempts += 1
-        random_digits = str(random.randint(0, 9)) + str(random.randint(0, 9)) + str(random.randint(0, 9))
-        partial_number = base_number + random_digits
-        luhn_digit = generate_luhn_digit(partial_number)
-        complete_number = partial_number + str(luhn_digit)
+    # Si la fecha NO es válida (vencida)
+    if not date_is_valid:
+        log_messages.append(f"⚠️ Fecha vencida detectada: {month}/{year}. Generando nueva fecha...")
+        month, year = generate_random_valid_date()
         
-        if luhn_checksum(complete_number) == 0:
-            # Generar CVV aleatorio (3 dígitos)
+        # Generar 20 variantes QUITANDO los últimos 5-6 dígitos
+        for i in range(count):
+            num_list = list(cardnumber)
+            
+            # Quitar los últimos 6 dígitos (reemplazar con X)
+            # Dejar solo los primeros len(cardnumber) - 6 dígitos
+            for j in range(len(num_list) - 6, len(num_list)):
+                if j >= 0:
+                    num_list[j] = str(random.randint(0, 9))
+            
+            complete_number = ''.join(num_list)
             random_cvv = random.randint(100, 999)
+            variant = f"{complete_number}{separator}{month}{separator}{year}{separator}{random_cvv}"
             
-            # Si la fecha original NO era válida, quitar 5 dígitos de la tarjeta
-            if not is_valid_date:
-                # Quitar 5 dígitos aleatorios y reemplazarlos por X
-                num_list = list(complete_number)
-                indices_to_remove = random.sample(range(4, len(num_list) - 1), 5)
-                for idx in indices_to_remove:
-                    num_list[idx] = 'X'
-                complete_number = ''.join(num_list)
-                log_messages.append(f"⚠️ CC con fecha inválida: {complete_number}|{month}|{year}|{random_cvv}")
-            
-            variant = f"{complete_number}|{month}|{year}|{random_cvv}"
             if variant not in variants:
                 variants.append(variant)
+        
+        log_messages.append(f"✓ Generadas {len(variants)} CCs con fecha actualizada (últimos 6 dígitos cambiados)")
     
-    log_messages.append(f"✓ Generadas {len(variants)} variantes de CC válidas")
+    # Si la fecha SÍ es válida
+    else:
+        base_number = cardnumber[:-4]  # Quitar los 4 últimos dígitos
+        
+        # Generar 20 variantes cambiando los 4 últimos dígitos
+        for i in range(count):
+            # Generar 4 dígitos aleatorios
+            last_four = ''.join([str(random.randint(0, 9)) for _ in range(4)])
+            complete_number = base_number + last_four
+            
+            # Generar CVV aleatorio
+            random_cvv = random.randint(100, 999)
+            variant = f"{complete_number}{separator}{month}{separator}{year}{separator}{random_cvv}"
+            
+            if variant not in variants:
+                variants.append(variant)
+        
+        log_messages.append(f"✓ Generadas {len(variants)} variantes (4 últimos dígitos cambiados)")
+    
     return variants
 
 # ============ MANEJADOR DE EVENTOS ============
@@ -195,7 +186,7 @@ async def response_handler(event):
             elif 'gate:' in line.lower():
                 gate = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
         
-        # ✅ NUEVO FORMATO - Team RedCards (MEJORADO Y SIMPLIFICADO CON LÍNEAS)
+        # ✅ NUEVO FORMATO - Team RedCards (MEJORADO Y BRUTAL)
         formatted_message = f"""╔════════════════════════════════════════╗
            Team RedCards 💳
 ╚════════════════════════════════════════╝
@@ -214,6 +205,7 @@ async def response_handler(event):
         live_entry = {
             "cc": cc_number,
             "status": status,
+            "response": response,
             "country": country,
             "bank": bank,
             "type": card_type,
@@ -226,7 +218,7 @@ async def response_handler(event):
         if len(lives_list) > 100:
             lives_list.pop(0)
         
-        # ENVIAR AL CANAL - SIN BOTÓN DE BUY VIP (MEJORADO)
+        # ENVIAR AL CANAL
         try:
             image_path = 'x1.jpg'
             
@@ -277,8 +269,8 @@ async def send_to_bot():
     """
     Envía CCs al bot de Telegram
     - Genera 20 variantes por BIN
-    - Valida fechas y las actualiza si están vencidas
-    - Quita 5 dígitos a las que tienen fecha inválida
+    - Si fecha vencida: genera nueva fecha y quita últimos 6 dígitos
+    - Si fecha válida: cambia solo los 4 últimos dígitos
     """
     while True:
         try:
@@ -303,7 +295,7 @@ async def send_to_bot():
                 
                 log_messages.append(f"INFO: Generando 20 variantes para {current_cc[:12]}...")
                 
-                # GENERAR 20 VARIANTES CON VALIDACIÓN DE FECHAS
+                # GENERAR 20 VARIANTES
                 cc_variants = generate_cc_variants(current_cc, count=20)
                 
                 if not cc_variants:
@@ -314,22 +306,20 @@ async def send_to_bot():
                 commands = await load_commands()
                 
                 # Enviar las 20 CCs generadas
-                for i in range(0, len(cc_variants), 2):
-                    pair = cc_variants[i:i+2]
-                    for cc in pair:
-                        selected_command = random.choice(commands)
-                        message = f"{selected_command} {cc}"
-                        
-                        try:
-                            await client.send_message('@Alphachekerbot', message)
-                            log_messages.append(f"✓ Enviado CC #{len(cc_variants) - len(pair) + 1}/20: {cc[:12]}...")
-                        except FloodWaitError as e:
-                            log_messages.append(f"WARNING: Esperando {e.seconds}s...")
-                            await asyncio.sleep(e.seconds)
-                        except RPCError as e:
-                            log_messages.append(f"ERROR RPC: {e}")
-                        
-                        await asyncio.sleep(21)
+                for i, cc in enumerate(cc_variants):
+                    selected_command = random.choice(commands)
+                    message = f"{selected_command} {cc}"
+                    
+                    try:
+                        await client.send_message('@Alphachekerbot', message)
+                        log_messages.append(f"✓ Enviado CC #{i+1}/20: {cc[:12]}...")
+                    except FloodWaitError as e:
+                        log_messages.append(f"WARNING: Esperando {e.seconds}s...")
+                        await asyncio.sleep(e.seconds)
+                    except RPCError as e:
+                        log_messages.append(f"ERROR RPC: {e}")
+                    
+                    await asyncio.sleep(21)
                 
                 log_messages.append(f"✓ Lote completado: 20/20 CCs enviadas")
             else:

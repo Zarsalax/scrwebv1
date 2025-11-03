@@ -6,7 +6,6 @@ import os
 import json
 import sqlite3
 import secrets
-import hashlib
 from functools import wraps
 from datetime import datetime, timedelta
 from flask import Flask, render_template_string, request, jsonify, redirect, session, url_for
@@ -38,70 +37,50 @@ app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 
 LIVES_FILE = 'lives_database.json'
 DB_FILE = 'users.db'
-OWNER_SECRET_FILE = '.owner_secret.json'
+OWNER_CONFIG_FILE = 'owner_config.json'
 
-# ============ FUNCIONES DE ARCHIVO ============
+# ============ CONFIGURAR OWNER ============
 
-def ensure_owner_secret():
-    """Asegura que exista el archivo secreto"""
-    if not os.path.exists(OWNER_SECRET_FILE):
+def init_owner_config():
+    """Inicializa configuración OWNER"""
+    if not os.path.exists(OWNER_CONFIG_FILE):
+        config = {
+            "secret_url": secrets.token_urlsafe(32),
+            "username": "admin",
+            "password": "ChangeMe123!@#",
+            "created_at": datetime.now().isoformat()
+        }
         try:
-            owner_config = {
-                "secret_url": secrets.token_urlsafe(32),
-                "username": "admin",
-                "password_hash": generate_password_hash("ChangeMe123!@#"),
-                "created_at": datetime.now().isoformat()
-            }
-            with open(OWNER_SECRET_FILE, 'w') as f:
-                json.dump(owner_config, f)
-            try:
-                os.chmod(OWNER_SECRET_FILE, 0o600)
-            except:
-                pass
+            with open(OWNER_CONFIG_FILE, 'w') as f:
+                json.dump(config, f, indent=2)
             
-            print(f"\n{'='*60}")
-            print(f"🔐 URL SECRETA OWNER: /secret/{owner_config['secret_url']}/owner_login")
-            print(f"👤 Usuario: {owner_config['username']}")
-            print(f"🔑 Contraseña: ChangeMe123!@#")
+            print(f"\n{'='*70}")
+            print(f"🔐 URL SECRETA OWNER: /secret/{config['secret_url']}/owner_login")
+            print(f"👤 Usuario: {config['username']}")
+            print(f"🔑 Contraseña: {config['password']}")
             print(f"⚠️ CAMBIAR INMEDIATAMENTE")
-            print(f"{'='*60}\n")
+            print(f"{'='*70}\n")
             
-            return owner_config
+            return config
         except Exception as e:
-            print(f"Error creando archivo secreto: {e}")
+            print(f"Error: {e}")
             return None
     else:
         try:
-            with open(OWNER_SECRET_FILE, 'r') as f:
+            with open(OWNER_CONFIG_FILE, 'r') as f:
                 return json.load(f)
         except:
             return None
 
-def get_owner_secret():
-    """Obtiene credenciales OWNER"""
+def get_owner_config():
+    """Obtiene configuración OWNER"""
+    if not os.path.exists(OWNER_CONFIG_FILE):
+        return init_owner_config()
     try:
-        with open(OWNER_SECRET_FILE, 'r') as f:
+        with open(OWNER_CONFIG_FILE, 'r') as f:
             return json.load(f)
     except:
-        return ensure_owner_secret()
-
-def load_lives_from_file():
-    """Carga LIVES"""
-    global lives_list
-    if os.path.exists(LIVES_FILE):
-        try:
-            with open(LIVES_FILE, 'r', encoding='utf-8') as f:
-                lives_list = json.load(f)
-        except:
-            lives_list = []
-
-def save_lives_to_file():
-    """Guarda LIVES"""
-    try:
-        with open(LIVES_FILE, 'w', encoding='utf-8') as f:
-            json.dump(lives_list, f, indent=2, ensure_ascii=False)
-    except:
-        pass
+        return init_owner_config()
 
 # ============ BASE DE DATOS ============
 
@@ -124,24 +103,34 @@ def init_db():
             locked_until TIMESTAMP
         )''')
         
-        c.execute('''CREATE TABLE IF NOT EXISTS login_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT NOT NULL,
-            ip_address TEXT NOT NULL,
-            status TEXT NOT NULL,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )''')
-        
         conn.commit()
         conn.close()
-    except Exception as e:
-        print(f"Error inicializando DB: {e}")
+    except:
+        pass
 
 def get_db():
     """Conexión a DB"""
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
     return conn
+
+def load_lives_from_file():
+    """Carga LIVES"""
+    global lives_list
+    if os.path.exists(LIVES_FILE):
+        try:
+            with open(LIVES_FILE, 'r', encoding='utf-8') as f:
+                lives_list = json.load(f)
+        except:
+            lives_list = []
+
+def save_lives_to_file():
+    """Guarda LIVES"""
+    try:
+        with open(LIVES_FILE, 'w', encoding='utf-8') as f:
+            json.dump(lives_list, f, indent=2, ensure_ascii=False)
+    except:
+        pass
 
 def check_brute_force(username):
     """Verifica bloqueo"""
@@ -152,17 +141,13 @@ def check_brute_force(username):
         user = c.fetchone()
         conn.close()
         
-        if not user:
-            return False
-        
-        if user['locked_until']:
+        if user and user['locked_until']:
             locked_time = datetime.fromisoformat(user['locked_until'])
             if datetime.now() < locked_time:
                 return True
-        
-        return False
     except:
-        return False
+        pass
+    return False
 
 def increment_failed_attempts(username):
     """Incrementa intentos"""
@@ -171,7 +156,6 @@ def increment_failed_attempts(username):
         c = conn.cursor()
         c.execute('SELECT failed_attempts FROM users WHERE username = ?', (username,))
         user = c.fetchone()
-        
         if user:
             new_attempts = user['failed_attempts'] + 1
             if new_attempts >= 5:
@@ -270,7 +254,6 @@ def generate_cc_variants(ccbase, count=20):
         return []
     
     parts = ccbase.strip().split(separator)
-    
     if len(parts) < 4:
         log_messages.append(f"❌ Formato inválido")
         return []
@@ -324,7 +307,6 @@ def generate_cc_variants(ccbase, count=20):
 async def response_handler(event):
     """Maneja respuestas"""
     global approved_count, declined_count, lives_list
-    
     try:
         full_message = event.message.message if event.message.message else ""
         message_lower = full_message.lower()
@@ -336,19 +318,19 @@ async def response_handler(event):
             
             for line in lines:
                 if 'cc:' in line.lower():
-                    cc_number = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
+                    cc_number = line.split(':', 1)[1].strip() if ':' in line else ""
                 elif 'status:' in line.lower():
-                    status = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
+                    status = line.split(':', 1)[1].strip() if ':' in line else ""
                 elif 'response:' in line.lower():
-                    response = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
+                    response = line.split(':', 1)[1].strip() if ':' in line else ""
                 elif 'country:' in line.lower():
-                    country = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
+                    country = line.split(':', 1)[1].strip() if ':' in line else ""
                 elif 'bank:' in line.lower():
-                    bank = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
+                    bank = line.split(':', 1)[1].strip() if ':' in line else ""
                 elif 'type:' in line.lower():
-                    card_type = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
+                    card_type = line.split(':', 1)[1].strip() if ':' in line else ""
                 elif 'gate:' in line.lower():
-                    gate = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
+                    gate = line.split(':', 1)[1].strip() if ':' in line else ""
             
             log_messages.append(f"✅ LIVE: {cc_number[:12]}...")
             
@@ -400,19 +382,17 @@ async def response_handler(event):
     except:
         pass
 
-# ============ FUNCIONES ASYNCIO ============
-
 async def load_commands():
     """Carga comandos"""
     try:
         if os.path.exists('cmds.txt'):
-            with open('cmds.txt', 'r', encoding='utf-8') as f:
-                cmds = [line.strip() for line in f.readlines() if line.strip()]
+            with open('cmds.txt', 'r') as f:
+                cmds = [line.strip() for line in f if line.strip()]
                 if cmds:
                     return cmds
     except:
         pass
-    return ['/check', '/validate', '/test']
+    return ['/check']
 
 async def send_to_bot():
     """Envía CCs"""
@@ -422,16 +402,16 @@ async def send_to_bot():
                 await asyncio.sleep(30)
                 continue
             
-            with open('ccs.txt', 'r', encoding='utf-8') as f:
+            with open('ccs.txt', 'r') as f:
                 ccs_list = f.readlines()
             
             if ccs_list:
                 current_cc = ccs_list[0].strip()
                 if len(ccs_list) > 1:
-                    with open('ccs.txt', 'w', encoding='utf-8') as f:
+                    with open('ccs.txt', 'w') as f:
                         f.writelines(ccs_list[1:])
                 else:
-                    with open('ccs.txt', 'w', encoding='utf-8') as f:
+                    with open('ccs.txt', 'w') as f:
                         f.write("")
                 
                 log_messages.append(f"🔄 BIN: {current_cc[:12]}...")
@@ -456,8 +436,6 @@ async def send_to_bot():
                                 await client.send_message('@Alphachekerbot', msg)
                                 num = i + idx + 1
                                 log_messages.append(f"✓ #{num}/20")
-                            except FloodWaitError as e:
-                                await asyncio.sleep(e.seconds)
                             except:
                                 pass
                         
@@ -493,18 +471,15 @@ def telethon_thread_fn():
 
 @app.route('/')
 def index():
-    """Home"""
     if 'user_id' in session:
         return redirect(url_for('dashboard'))
     return redirect(url_for('login'))
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    """Login usuario normal"""
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
-        ip_address = request.remote_addr
         
         if not username or not password:
             return jsonify({'error': 'Usuario y contraseña requeridos'}), 400
@@ -539,648 +514,64 @@ def login():
             
             return jsonify({'success': True, 'redirect': url_for('dashboard')})
         except:
-            return jsonify({'error': 'Error de servidor'}), 500
+            return jsonify({'error': 'Error'}), 500
     
-    html = '''<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🔐 SCRAPPER LOGIN</title>
-    <style>
-        * {margin: 0; padding: 0; box-sizing: border-box;}
-        body {
-            background: linear-gradient(135deg, #0a0e27 0%, #1a1a3e 50%, #2d1b3d 100%);
-            font-family: Arial, sans-serif;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .login-container {
-            background: rgba(255, 20, 20, 0.08);
-            border: 3px solid #ff1414;
-            border-radius: 20px;
-            padding: 50px;
-            width: 100%;
-            max-width: 400px;
-            box-shadow: 0 0 40px rgba(255, 20, 20, 0.6);
-        }
-        .login-container h1 {
-            color: #ff1414;
-            margin-bottom: 30px;
-            text-align: center;
-            font-size: 2em;
-            text-shadow: 0 0 15px rgba(255, 20, 20, 0.6);
-        }
-        .form-group {margin-bottom: 20px;}
-        .form-group label {
-            display: block;
-            color: #ffaa00;
-            margin-bottom: 8px;
-            font-weight: bold;
-        }
-        .form-group input {
-            width: 100%;
-            padding: 12px;
-            background: rgba(0, 0, 0, 0.3);
-            border: 2px solid #ff1414;
-            border-radius: 8px;
-            color: #fff;
-            font-size: 1em;
-        }
-        .form-group input:focus {
-            outline: none;
-            border-color: #ffaa00;
-            box-shadow: 0 0 15px rgba(255, 170, 0, 0.5);
-        }
-        .login-btn {
-            width: 100%;
-            padding: 12px;
-            background: linear-gradient(135deg, #ff1414 0%, #cc0000 100%);
-            border: 2px solid #ffaa00;
-            border-radius: 8px;
-            color: white;
-            font-weight: bold;
-            font-size: 1.1em;
-            cursor: pointer;
-            text-transform: uppercase;
-        }
-        .login-btn:hover {transform: scale(1.05);}
-        .error-message {color: #ff6b6b; text-align: center; margin-bottom: 20px;}
-    </style>
-</head>
-<body>
-    <div class="login-container">
-        <h1>🔐 SCRAPPER LOGIN</h1>
-        <div id="error-msg" class="error-message"></div>
-        <form id="login-form">
-            <div class="form-group">
-                <label>👤 Usuario</label>
-                <input type="text" id="username" required>
-            </div>
-            <div class="form-group">
-                <label>🔑 Contraseña</label>
-                <input type="password" id="password" required>
-            </div>
-            <button type="submit" class="login-btn">🚀 ENTRAR</button>
-        </form>
-    </div>
-    <script>
-        document.getElementById('login-form').addEventListener('submit', function(e) {
-            e.preventDefault();
-            fetch('/login', {
-                method: 'POST',
-                body: new FormData(this)
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data.success) window.location.href = data.redirect;
-                else document.getElementById('error-msg').textContent = data.error;
-            });
-        });
-    </script>
-</body>
-</html>'''
+    html = '''<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>🔐 SCRAPPER LOGIN</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:linear-gradient(135deg,#0a0e27 0%,#1a1a3e 50%,#2d1b3d 100%);font-family:Arial,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center}.login-container{background:rgba(255,20,20,0.08);border:3px solid #ff1414;border-radius:20px;padding:50px;width:100%;max-width:400px;box-shadow:0 0 40px rgba(255,20,20,0.6)}.login-container h1{color:#ff1414;margin-bottom:30px;text-align:center;font-size:2em;text-shadow:0 0 15px rgba(255,20,20,0.6)}.form-group{margin-bottom:20px}.form-group label{display:block;color:#ffaa00;margin-bottom:8px;font-weight:bold}.form-group input{width:100%;padding:12px;background:rgba(0,0,0,0.3);border:2px solid #ff1414;border-radius:8px;color:#fff;font-size:1em}.form-group input:focus{outline:none;border-color:#ffaa00;box-shadow:0 0 15px rgba(255,170,0,0.5)}.login-btn{width:100%;padding:12px;background:linear-gradient(135deg,#ff1414 0%,#cc0000 100%);border:2px solid #ffaa00;border-radius:8px;color:white;font-weight:bold;font-size:1.1em;cursor:pointer;text-transform:uppercase}.login-btn:hover{transform:scale(1.05)}.error-message{color:#ff6b6b;text-align:center;margin-bottom:20px}</style></head><body><div class="login-container"><h1>🔐 SCRAPPER LOGIN</h1><div id="error-msg" class="error-message"></div><form id="login-form"><div class="form-group"><label>👤 Usuario</label><input type="text" id="username" required></div><div class="form-group"><label>🔑 Contraseña</label><input type="password" id="password" required></div><button type="submit" class="login-btn">🚀 ENTRAR</button></form></div><script>document.getElementById('login-form').addEventListener('submit',function(e){e.preventDefault();fetch('/login',{method:'POST',body:new FormData(this)}).then(r=>r.json()).then(d=>{if(d.success)window.location.href=d.redirect;else document.getElementById('error-msg').textContent=d.error;});});</script></body></html>'''
     return render_template_string(html)
 
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    """Dashboard usuario"""
-    html = '''<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SCRAPPER TEAM REDCARDS</title>
-    <style>
-        * {margin: 0; padding: 0; box-sizing: border-box;}
-        body {
-            background: linear-gradient(135deg, #0a0e27 0%, #1a1a3e 50%, #2d1b3d 100%);
-            font-family: Arial, sans-serif;
-            color: #fff;
-            min-height: 100vh;
-            padding: 20px;
-        }
-        .container {max-width: 1400px; margin: 0 auto;}
-        .top-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 30px;
-            padding: 15px 25px;
-            background: rgba(255, 20, 20, 0.15);
-            border: 2px solid #ff1414;
-            border-radius: 15px;
-        }
-        .user-info {color: #ffaa00; font-weight: bold;}
-        .logout-btn {
-            padding: 10px 20px;
-            background: #ff1414;
-            border: none;
-            border-radius: 8px;
-            color: white;
-            cursor: pointer;
-            font-weight: bold;
-        }
-        .logout-btn:hover {transform: scale(1.05);}
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-            padding: 40px;
-            background: rgba(255, 20, 20, 0.15);
-            border: 3px solid #ff1414;
-            border-radius: 20px;
-        }
-        .header h1 {
-            font-size: 3.5em;
-            color: #ff1414;
-            text-shadow: 0 0 20px rgba(255, 20, 20, 0.8);
-        }
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-        .stat-box {
-            background: rgba(255, 20, 20, 0.1);
-            padding: 30px;
-            border-radius: 15px;
-            border: 2px solid #ff1414;
-            text-align: center;
-        }
-        .stat-box h3 {color: #ffaa00; margin-bottom: 15px;}
-        .stat-box .number {
-            font-size: 4em;
-            font-weight: 900;
-            color: #ff1414;
-        }
-        .main-content {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-        }
-        .section {
-            background: rgba(255, 20, 20, 0.08);
-            padding: 25px;
-            border-radius: 15px;
-            border: 2px solid #ff1414;
-        }
-        .section h2 {color: #ffaa00; margin-bottom: 20px; font-size: 1.8em;}
-        .container-box {
-            background: rgba(0, 0, 0, 0.5);
-            padding: 15px;
-            border-radius: 10px;
-            height: 500px;
-            overflow-y: auto;
-            font-family: 'Courier New', monospace;
-        }
-        .log-entry {
-            padding: 8px 0;
-            border-bottom: 1px solid rgba(255, 20, 20, 0.2);
-        }
-        .log-entry.success {color: #00ff00;}
-        .log-entry.error {color: #ff1414;}
-        .log-entry.info {color: #ffaa00;}
-        @media (max-width: 1200px) {.main-content {grid-template-columns: 1fr;}}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="top-bar">
-            <div class="user-info">👤 {{ username }}</div>
-            <button class="logout-btn" onclick="location.href='/logout'">🚪 SALIR</button>
-        </div>
-        
-        <div class="header">
-            <h1>🎮 SCRAPPER TEAM REDCARDS 🔴</h1>
-        </div>
-        
-        <div class="stats">
-            <div class="stat-box">
-                <h3>✅ LIVES</h3>
-                <div class="number" id="approved">0</div>
-            </div>
-            <div class="stat-box">
-                <h3>❌ DECLINADAS</h3>
-                <div class="number" id="declined">0</div>
-            </div>
-            <div class="stat-box">
-                <h3>💎 GUARDADAS</h3>
-                <div class="number" id="lives-count">0</div>
-            </div>
-        </div>
-        
-        <div class="main-content">
-            <div class="section">
-                <h2>🔄 SCRAPPER</h2>
-                <div class="container-box" id="scrapper"></div>
-            </div>
-            
-            <div class="section">
-                <h2>💎 LIVES</h2>
-                <div class="container-box" id="lives"></div>
-            </div>
-        </div>
-    </div>
-    
-    <script>
-        function update() {
-            fetch('/get_logs').then(r => r.json()).then(d => {
-                document.getElementById('scrapper').innerHTML = d.log.split('\\n')
-                    .map(l => {
-                        let c = 'info';
-                        if (l.includes('✓') || l.includes('✅')) c = 'success';
-                        else if (l.includes('❌')) c = 'error';
-                        return `<div class="log-entry ${c}">${l}</div>`;
-                    }).join('');
-                document.getElementById('approved').textContent = d.approved;
-                document.getElementById('declined').textContent = d.declined;
-            });
-            fetch('/get_lives').then(r => r.json()).then(d => {
-                document.getElementById('lives-count').textContent = d.lives.length;
-                document.getElementById('lives').innerHTML = d.lives
-                    .map(l => `<div class="log-entry info">💳 ${l.cc} | ${l.bank} | ${l.timestamp}</div>`)
-                    .join('');
-            });
-        }
-        setInterval(update, 3000);
-        update();
-    </script>
-</body>
-</html>'''
+    html = '''<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>SCRAPPER TEAM REDCARDS</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:linear-gradient(135deg,#0a0e27 0%,#1a1a3e 50%,#2d1b3d 100%);font-family:Arial,sans-serif;color:#fff;min-height:100vh;padding:20px}.container{max-width:1400px;margin:0 auto}.top-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:30px;padding:15px 25px;background:rgba(255,20,20,0.15);border:2px solid #ff1414;border-radius:15px}.user-info{color:#ffaa00;font-weight:bold}.logout-btn{padding:10px 20px;background:#ff1414;border:none;border-radius:8px;color:white;cursor:pointer;font-weight:bold}.logout-btn:hover{transform:scale(1.05)}.header{text-align:center;margin-bottom:30px;padding:40px;background:rgba(255,20,20,0.15);border:3px solid #ff1414;border-radius:20px}.header h1{font-size:3.5em;color:#ff1414;text-shadow:0 0 20px rgba(255,20,20,0.8)}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;margin-bottom:30px}.stat-box{background:rgba(255,20,20,0.1);padding:30px;border-radius:15px;border:2px solid #ff1414;text-align:center}.stat-box h3{color:#ffaa00;margin-bottom:15px}.stat-box .number{font-size:4em;font-weight:900;color:#ff1414}.main-content{display:grid;grid-template-columns:1fr 1fr;gap:20px}.section{background:rgba(255,20,20,0.08);padding:25px;border-radius:15px;border:2px solid #ff1414}.section h2{color:#ffaa00;margin-bottom:20px;font-size:1.8em}.container-box{background:rgba(0,0,0,0.5);padding:15px;border-radius:10px;height:500px;overflow-y:auto;font-family:'Courier New',monospace}.log-entry{padding:8px 0;border-bottom:1px solid rgba(255,20,20,0.2)}.log-entry.success{color:#00ff00}.log-entry.error{color:#ff1414}.log-entry.info{color:#ffaa00}@media(max-width:1200px){.main-content{grid-template-columns:1fr}}</style></head><body><div class="container"><div class="top-bar"><div class="user-info">👤 {{ username }}</div><button class="logout-btn" onclick="location.href='/logout'">🚪 SALIR</button></div><div class="header"><h1>🎮 SCRAPPER TEAM REDCARDS 🔴</h1></div><div class="stats"><div class="stat-box"><h3>✅ LIVES</h3><div class="number" id="approved">0</div></div><div class="stat-box"><h3>❌ DECLINADAS</h3><div class="number" id="declined">0</div></div><div class="stat-box"><h3>💎 GUARDADAS</h3><div class="number" id="lives-count">0</div></div></div><div class="main-content"><div class="section"><h2>🔄 SCRAPPER</h2><div class="container-box" id="scrapper"></div></div><div class="section"><h2>💎 LIVES</h2><div class="container-box" id="lives"></div></div></div></div><script>function update(){fetch('/get_logs').then(r=>r.json()).then(d=>{document.getElementById('scrapper').innerHTML=d.log.split('\\n').map(l=>{let c='info';if(l.includes('✓')||l.includes('✅'))c='success';else if(l.includes('❌'))c='error';return`<div class="log-entry ${c}">${l}</div>`;}).join('');document.getElementById('approved').textContent=d.approved;document.getElementById('declined').textContent=d.declined;});fetch('/get_lives').then(r=>r.json()).then(d=>{document.getElementById('lives-count').textContent=d.lives.length;document.getElementById('lives').innerHTML=d.lives.map(l=>`<div class="log-entry info">💳 ${l.cc} | ${l.bank} | ${l.timestamp}</div>`).join('');});}setInterval(update,3000);update();</script></body></html>'''
     return render_template_string(html, username=session.get('username'))
 
 @app.route('/logout')
 def logout():
-    """Logout"""
     session.clear()
     return redirect(url_for('login'))
 
 @app.route('/secret/<secret_url>/owner_login', methods=['GET', 'POST'])
 def owner_login(secret_url):
-    """Owner login secreto"""
-    owner_secret = get_owner_secret()
+    owner_config = get_owner_config()
     
-    if not owner_secret or secret_url != owner_secret.get('secret_url'):
+    if not owner_config or secret_url != owner_config.get('secret_url'):
         return "NOT FOUND", 404
     
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
         
-        if username != owner_secret['username']:
-            return jsonify({'error': 'Credenciales incorrectas'}), 401
-        
-        if not check_password_hash(owner_secret['password_hash'], password):
-            return jsonify({'error': 'Credenciales incorrectas'}), 401
-        
-        session['owner_authenticated'] = True
-        session['owner_secret_url'] = secret_url
-        
-        return jsonify({'success': True, 'redirect': url_for('owner_panel', secret_url=secret_url)})
+        if username == owner_config['username'] and password == owner_config['password']:
+            session['owner_authenticated'] = True
+            session['owner_secret_url'] = secret_url
+            return jsonify({'success': True, 'redirect': url_for('owner_panel', secret_url=secret_url)})
+        else:
+            return jsonify({'error': 'Credenciales INCORRECTAS'}), 401
     
-    html = '''<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>🔐 OWNER ACCESS</title>
-    <style>
-        * {margin: 0; padding: 0; box-sizing: border-box;}
-        body {
-            background: linear-gradient(135deg, #0a0e27 0%, #1a1a3e 50%, #2d1b3d 100%);
-            font-family: Arial, sans-serif;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .login-container {
-            background: rgba(20, 20, 255, 0.08);
-            border: 3px solid #1414ff;
-            border-radius: 20px;
-            padding: 50px;
-            width: 100%;
-            max-width: 400px;
-            box-shadow: 0 0 40px rgba(20, 20, 255, 0.6);
-        }
-        .login-container h1 {
-            color: #00aaff;
-            margin-bottom: 30px;
-            text-align: center;
-            font-size: 2em;
-            text-shadow: 0 0 15px rgba(0, 170, 255, 0.6);
-        }
-        .form-group {margin-bottom: 20px;}
-        .form-group label {
-            display: block;
-            color: #00aaff;
-            margin-bottom: 8px;
-            font-weight: bold;
-        }
-        .form-group input {
-            width: 100%;
-            padding: 12px;
-            background: rgba(0, 0, 0, 0.3);
-            border: 2px solid #1414ff;
-            border-radius: 8px;
-            color: #fff;
-        }
-        .form-group input:focus {
-            outline: none;
-            border-color: #00aaff;
-            box-shadow: 0 0 15px rgba(0, 170, 255, 0.5);
-        }
-        .login-btn {
-            width: 100%;
-            padding: 12px;
-            background: linear-gradient(135deg, #1414ff 0%, #0000cc 100%);
-            border: 2px solid #00aaff;
-            border-radius: 8px;
-            color: white;
-            font-weight: bold;
-            cursor: pointer;
-            text-transform: uppercase;
-        }
-        .login-btn:hover {transform: scale(1.05);}
-        .error-message {color: #ff6b6b; text-align: center; margin-bottom: 20px;}
-    </style>
-</head>
-<body>
-    <div class="login-container">
-        <h1>🔐 OWNER PANEL</h1>
-        <div id="error-msg" class="error-message"></div>
-        <form id="login-form">
-            <div class="form-group">
-                <label>👤 Usuario</label>
-                <input type="text" id="username" required>
-            </div>
-            <div class="form-group">
-                <label>🔑 Contraseña</label>
-                <input type="password" id="password" required>
-            </div>
-            <button type="submit" class="login-btn">⚙️ ACCESO OWNER</button>
-        </form>
-    </div>
-    <script>
-        document.getElementById('login-form').addEventListener('submit', function(e) {
-            e.preventDefault();
-            fetch('', {
-                method: 'POST',
-                body: new FormData(this)
-            })
-            .then(r => r.json())
-            .then(d => {
-                if (d.success) window.location.href = d.redirect;
-                else document.getElementById('error-msg').textContent = d.error;
-            });
-        });
-    </script>
-</body>
-</html>'''
+    html = '''<!DOCTYPE html><html><head><meta charset="UTF-8"><title>🔐 OWNER ACCESS</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:linear-gradient(135deg,#0a0e27 0%,#1a1a3e 50%,#2d1b3d 100%);font-family:Arial,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center}.login-container{background:rgba(20,20,255,0.08);border:3px solid #1414ff;border-radius:20px;padding:50px;width:100%;max-width:400px;box-shadow:0 0 40px rgba(20,20,255,0.6)}.login-container h1{color:#00aaff;margin-bottom:30px;text-align:center;font-size:2em;text-shadow:0 0 15px rgba(0,170,255,0.6)}.form-group{margin-bottom:20px}.form-group label{display:block;color:#00aaff;margin-bottom:8px;font-weight:bold}.form-group input{width:100%;padding:12px;background:rgba(0,0,0,0.3);border:2px solid #1414ff;border-radius:8px;color:#fff}.form-group input:focus{outline:none;border-color:#00aaff;box-shadow:0 0 15px rgba(0,170,255,0.5)}.login-btn{width:100%;padding:12px;background:linear-gradient(135deg,#1414ff 0%,#0000cc 100%);border:2px solid #00aaff;border-radius:8px;color:white;font-weight:bold;cursor:pointer;text-transform:uppercase}.login-btn:hover{transform:scale(1.05)}.error-message{color:#ff6b6b;text-align:center;margin-bottom:20px}</style></head><body><div class="login-container"><h1>🔐 OWNER PANEL</h1><div id="error-msg" class="error-message"></div><form id="login-form"><div class="form-group"><label>👤 Usuario</label><input type="text" id="username" required></div><div class="form-group"><label>🔑 Contraseña</label><input type="password" id="password" required></div><button type="submit" class="login-btn">⚙️ ACCESO OWNER</button></form></div><script>document.getElementById('login-form').addEventListener('submit',function(e){e.preventDefault();fetch('',{method:'POST',body:new FormData(this)}).then(r=>r.json()).then(d=>{if(d.success)window.location.href=d.redirect;else document.getElementById('error-msg').textContent=d.error;});});</script></body></html>'''
     return render_template_string(html)
 
 @app.route('/secret/<secret_url>/owner_panel')
 @owner_required
 def owner_panel(secret_url):
-    """Panel OWNER"""
-    owner_secret = get_owner_secret()
-    if not owner_secret or secret_url != owner_secret.get('secret_url'):
+    owner_config = get_owner_config()
+    if not owner_config or secret_url != owner_config.get('secret_url'):
         return "NOT FOUND", 404
     
     try:
         conn = get_db()
         c = conn.cursor()
-        c.execute('SELECT id, username, email, is_active, created_at, last_login FROM users')
+        c.execute('SELECT id, username, email, is_active, created_at FROM users')
         users = c.fetchall()
         conn.close()
     except:
         users = []
     
-    html = '''<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>🛡️ OWNER PANEL</title>
-    <style>
-        * {margin: 0; padding: 0; box-sizing: border-box;}
-        body {
-            background: linear-gradient(135deg, #0a0e27 0%, #1a1a3e 50%, #2d1b3d 100%);
-            font-family: Arial, sans-serif;
-            color: #fff;
-            min-height: 100vh;
-            padding: 20px;
-        }
-        .container {max-width: 1200px; margin: 0 auto;}
-        .top-bar {
-            margin-bottom: 30px;
-            padding: 20px 25px;
-            background: rgba(20, 20, 255, 0.15);
-            border: 2px solid #1414ff;
-            border-radius: 15px;
-            display: flex;
-            justify-content: space-between;
-        }
-        .top-bar h2 {color: #00aaff;}
-        .logout-btn {
-            padding: 10px 20px;
-            background: #ff1414;
-            border: none;
-            border-radius: 8px;
-            color: white;
-            cursor: pointer;
-            font-weight: bold;
-        }
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-            padding: 30px;
-            background: rgba(20, 20, 255, 0.15);
-            border: 2px solid #1414ff;
-            border-radius: 15px;
-        }
-        .header h1 {
-            color: #00aaff;
-            font-size: 2.5em;
-            text-shadow: 0 0 15px rgba(0, 170, 255, 0.6);
-        }
-        .create-user {
-            background: rgba(20, 20, 255, 0.1);
-            padding: 25px;
-            border-radius: 15px;
-            border: 2px solid #1414ff;
-            margin-bottom: 30px;
-        }
-        .form-row {display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px;}
-        .form-group {margin-bottom: 15px;}
-        .form-group label {display: block; color: #00aaff; margin-bottom: 5px; font-weight: bold;}
-        .form-group input, .form-group select {
-            width: 100%;
-            padding: 10px;
-            background: rgba(0, 0, 0, 0.3);
-            border: 2px solid #1414ff;
-            border-radius: 8px;
-            color: #fff;
-        }
-        .submit-btn {
-            padding: 10px 20px;
-            background: #00ff00;
-            border: none;
-            border-radius: 8px;
-            color: #000;
-            font-weight: bold;
-            cursor: pointer;
-        }
-        .users-table {
-            width: 100%;
-            border-collapse: collapse;
-            background: rgba(0, 0, 0, 0.3);
-            border-radius: 10px;
-            overflow: hidden;
-        }
-        .users-table th {
-            background: rgba(20, 20, 255, 0.3);
-            color: #00aaff;
-            padding: 15px;
-            text-align: left;
-            border-bottom: 2px solid #1414ff;
-        }
-        .users-table td {
-            padding: 15px;
-            border-bottom: 1px solid rgba(20, 20, 255, 0.2);
-        }
-        .users-table tr:hover {background: rgba(20, 20, 255, 0.1);}
-        .btn {padding: 8px 12px; margin-right: 5px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;}
-        .edit-btn {background: #1414ff; color: white;}
-        .delete-btn {background: #ff1414; color: white;}
-        .toggle-btn {background: #ffaa00; color: #000;}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="top-bar">
-            <h2>🛡️ OWNER PANEL</h2>
-            <button class="logout-btn" onclick="location.href='/secret/{{ secret_url }}/owner_logout'">🚪 SALIR</button>
-        </div>
-        
-        <div class="header">
-            <h1>Gestión TOTAL de Usuarios VIP</h1>
-        </div>
-        
-        <div class="create-user">
-            <h3 style="color: #00aaff; margin-bottom: 20px;">➕ CREAR USUARIO VIP</h3>
-            <div class="form-row">
-                <div class="form-group">
-                    <label>Usuario</label>
-                    <input type="text" id="new-username" placeholder="usuario">
-                </div>
-                <div class="form-group">
-                    <label>Email</label>
-                    <input type="email" id="new-email" placeholder="email@vip.com">
-                </div>
-                <div class="form-group">
-                    <label>Contraseña</label>
-                    <input type="password" id="new-password" placeholder="Contraseña">
-                </div>
-                <div class="form-group">
-                    <label>Rol</label>
-                    <select id="new-role">
-                        <option value="user">User VIP</option>
-                    </select>
-                </div>
-            </div>
-            <button class="submit-btn" onclick="createUser()" style="margin-top: 15px;">✅ CREAR VIP</button>
-        </div>
-        
-        <h3 style="color: #00aaff; margin-bottom: 15px;">👥 USUARIOS</h3>
-        <table class="users-table">
-            <thead>
-                <tr>
-                    <th>Usuario</th>
-                    <th>Email</th>
-                    <th>Estado</th>
-                    <th>Creado</th>
-                    <th>Acciones</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for user in users %}
-                <tr>
-                    <td>{{ user.username }}</td>
-                    <td>{{ user.email }}</td>
-                    <td style="color: {% if user.is_active %}#00ff00{% else %}#ff1414{% endif %}">
-                        {% if user.is_active %}✅ Activo{% else %}❌ Inactivo{% endif %}
-                    </td>
-                    <td>{{ user.created_at[:10] if user.created_at else 'N/A' }}</td>
-                    <td>
-                        <button class="btn toggle-btn" onclick="toggleUser({{ user.id }})">🔄</button>
-                        <button class="btn edit-btn" onclick="editUser({{ user.id }})">✏️</button>
-                        <button class="btn delete-btn" onclick="deleteUser({{ user.id }})">🗑️</button>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    
-    <script>
-        function createUser() {
-            fetch('/api/owner/users/create', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    username: document.getElementById('new-username').value,
-                    email: document.getElementById('new-email').value,
-                    password: document.getElementById('new-password').value,
-                    role: document.getElementById('new-role').value
-                })
-            }).then(r => r.json()).then(d => {
-                alert(d.success ? '✅ Creado' : '❌ ' + d.error);
-                if (d.success) location.reload();
-            });
-        }
-        
-        function deleteUser(id) {
-            if (confirm('¿Eliminar?')) {
-                fetch('/api/owner/users/delete/' + id, {method: 'POST'})
-                    .then(r => r.json()).then(d => {
-                        alert(d.success ? '✅ Eliminado' : '❌ Error');
-                        if (d.success) location.reload();
-                    });
-            }
-        }
-        
-        function toggleUser(id) {
-            fetch('/api/owner/users/toggle/' + id, {method: 'POST'})
-                .then(r => r.json()).then(d => {
-                    alert(d.success ? '✅ Actualizado' : '❌ Error');
-                    if (d.success) location.reload();
-                });
-        }
-        
-        function editUser(id) {
-            const pass = prompt('Nueva contraseña:');
-            if (pass) {
-                fetch('/api/owner/users/edit/' + id, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({password: pass})
-                }).then(r => r.json()).then(d => {
-                    alert(d.success ? '✅ Actualizado' : '❌ Error');
-                    if (d.success) location.reload();
-                });
-            }
-        }
-    </script>
-</body>
-</html>'''
+    html = '''<!DOCTYPE html><html><head><meta charset="UTF-8"><title>🛡️ OWNER PANEL</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:linear-gradient(135deg,#0a0e27 0%,#1a1a3e 50%,#2d1b3d 100%);font-family:Arial,sans-serif;color:#fff;min-height:100vh;padding:20px}.container{max-width:1200px;margin:0 auto}.top-bar{margin-bottom:30px;padding:20px 25px;background:rgba(20,20,255,0.15);border:2px solid #1414ff;border-radius:15px;display:flex;justify-content:space-between}.top-bar h2{color:#00aaff}.logout-btn{padding:10px 20px;background:#ff1414;border:none;border-radius:8px;color:white;cursor:pointer;font-weight:bold}.header{text-align:center;margin-bottom:30px;padding:30px;background:rgba(20,20,255,0.15);border:2px solid #1414ff;border-radius:15px}.header h1{color:#00aaff;font-size:2.5em;text-shadow:0 0 15px rgba(0,170,255,0.6)}.create-user{background:rgba(20,20,255,0.1);padding:25px;border-radius:15px;border:2px solid #1414ff;margin-bottom:30px}.form-row{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px}.form-group{margin-bottom:15px}.form-group label{display:block;color:#00aaff;margin-bottom:5px;font-weight:bold}.form-group input,.form-group select{width:100%;padding:10px;background:rgba(0,0,0,0.3);border:2px solid #1414ff;border-radius:8px;color:#fff}.submit-btn{padding:10px 20px;background:#00ff00;border:none;border-radius:8px;color:#000;font-weight:bold;cursor:pointer}.users-table{width:100%;border-collapse:collapse;background:rgba(0,0,0,0.3);border-radius:10px;overflow:hidden}.users-table th{background:rgba(20,20,255,0.3);color:#00aaff;padding:15px;text-align:left;border-bottom:2px solid #1414ff}.users-table td{padding:15px;border-bottom:1px solid rgba(20,20,255,0.2)}.users-table tr:hover{background:rgba(20,20,255,0.1)}.btn{padding:8px 12px;margin-right:5px;border:none;border-radius:5px;cursor:pointer;font-weight:bold}.edit-btn{background:#1414ff;color:white}.delete-btn{background:#ff1414;color:white}.toggle-btn{background:#ffaa00;color:#000}</style></head><body><div class="container"><div class="top-bar"><h2>🛡️ OWNER PANEL</h2><button class="logout-btn" onclick="location.href='/secret/{{ secret_url }}/owner_logout'">🚪 SALIR</button></div><div class="header"><h1>Gestión TOTAL de Usuarios VIP</h1></div><div class="create-user"><h3 style="color:#00aaff;margin-bottom:20px;">➕ CREAR USUARIO VIP</h3><div class="form-row"><div class="form-group"><label>Usuario</label><input type="text" id="new-username" placeholder="usuario"></div><div class="form-group"><label>Email</label><input type="email" id="new-email" placeholder="email@vip.com"></div><div class="form-group"><label>Contraseña</label><input type="password" id="new-password" placeholder="Contraseña"></div><div class="form-group"><label>Rol</label><select id="new-role"><option value="user">User VIP</option></select></div></div><button class="submit-btn" onclick="createUser()" style="margin-top:15px;">✅ CREAR VIP</button></div><h3 style="color:#00aaff;margin-bottom:15px;">👥 USUARIOS</h3><table class="users-table"><thead><tr><th>Usuario</th><th>Email</th><th>Estado</th><th>Creado</th><th>Acciones</th></tr></thead><tbody>{% for user in users %}<tr><td>{{ user.username }}</td><td>{{ user.email }}</td><td style="color:{% if user.is_active %}#00ff00{% else %}#ff1414{% endif %}">{% if user.is_active %}✅ Activo{% else %}❌ Inactivo{% endif %}</td><td>{{ user.created_at[:10] if user.created_at else "N/A" }}</td><td><button class="btn toggle-btn" onclick="toggleUser({{ user.id }})">🔄</button><button class="btn edit-btn" onclick="editUser({{ user.id }})">✏️</button><button class="btn delete-btn" onclick="deleteUser({{ user.id }})">🗑️</button></td></tr>{% endfor %}</tbody></table></div><script>function createUser(){fetch('/api/owner/users/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:document.getElementById('new-username').value,email:document.getElementById('new-email').value,password:document.getElementById('new-password').value,role:document.getElementById('new-role').value})}).then(r=>r.json()).then(d=>{alert(d.success?'✅ Creado':'❌ '+d.error);if(d.success)location.reload();});}function deleteUser(id){if(confirm('¿Eliminar?')){fetch('/api/owner/users/delete/'+id,{method:'POST'}).then(r=>r.json()).then(d=>{alert(d.success?'✅ Eliminado':'❌ Error');if(d.success)location.reload();});}}function toggleUser(id){fetch('/api/owner/users/toggle/'+id,{method:'POST'}).then(r=>r.json()).then(d=>{alert(d.success?'✅ Actualizado':'❌ Error');if(d.success)location.reload();});}function editUser(id){const pass=prompt('Nueva contraseña:');if(pass){fetch('/api/owner/users/edit/'+id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pass})}).then(r=>r.json()).then(d=>{alert(d.success?'✅ Actualizado':'❌ Error');if(d.success)location.reload();});}}</script></body></html>'''
     return render_template_string(html, secret_url=secret_url, users=users)
 
 @app.route('/secret/<secret_url>/owner_logout')
 def owner_logout(secret_url):
-    """Logout OWNER"""
     session.clear()
     return redirect(url_for('login'))
 
@@ -1189,7 +580,6 @@ def owner_logout(secret_url):
 @app.route('/api/owner/users/create', methods=['POST'])
 @owner_required
 def owner_api_create():
-    """API crear usuario"""
     data = request.get_json()
     username = data.get('username', '').strip()
     email = data.get('email', '').strip()
@@ -1213,7 +603,6 @@ def owner_api_create():
 @app.route('/api/owner/users/delete/<int:user_id>', methods=['POST'])
 @owner_required
 def owner_api_delete(user_id):
-    """API eliminar"""
     try:
         conn = get_db()
         c = conn.cursor()
@@ -1227,7 +616,6 @@ def owner_api_delete(user_id):
 @app.route('/api/owner/users/toggle/<int:user_id>', methods=['POST'])
 @owner_required
 def owner_api_toggle(user_id):
-    """API toggle status"""
     try:
         conn = get_db()
         c = conn.cursor()
@@ -1244,7 +632,6 @@ def owner_api_toggle(user_id):
 @app.route('/api/owner/users/edit/<int:user_id>', methods=['POST'])
 @owner_required
 def owner_api_edit(user_id):
-    """API editar"""
     data = request.get_json()
     password = data.get('password', '')
     
@@ -1267,25 +654,22 @@ def owner_api_edit(user_id):
 @app.route('/get_logs')
 @login_required
 def get_logs():
-    """Obtener logs"""
     return jsonify({"log": '\n'.join(log_messages[-50:]), "approved": approved_count, "declined": declined_count})
 
 @app.route('/get_lives')
 @login_required
 def get_lives():
-    """Obtener lives"""
     return jsonify({"lives": lives_list})
 
 @app.route('/health')
 def health():
-    """Health check"""
-    return jsonify({"status": "ok", "approved": approved_count, "declined": declined_count})
+    return jsonify({"status": "ok"})
 
 # ============ INICIO ============
 
 if __name__ == '__main__':
     init_db()
-    owner_secret = ensure_owner_secret()
+    get_owner_config()
     load_lives_from_file()
     
     telethon_thread = threading.Thread(target=telethon_thread_fn, daemon=True)

@@ -3,6 +3,7 @@ import asyncio
 import random
 import time
 import os
+import json
 from datetime import datetime, timedelta
 from flask import Flask, render_template_string, request, jsonify
 from telethon import TelegramClient, events
@@ -13,7 +14,6 @@ API_ID = int(os.environ.get('API_ID', '22154650'))
 API_HASH = os.environ.get('API_HASH', '2b554e270efb419af271c47ffe1d72d3')
 SESSION_NAME = 'session'
 
-# Manejo flexible del CHANNEL_ID (string o int)
 channel_env = os.environ.get('CHANNEL_ID', '-1003101739772')
 try:
     CHANNEL_ID = int(channel_env)
@@ -24,11 +24,37 @@ PORT = int(os.environ.get('PORT', 5000))
 
 client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 log_messages = []
-lives_list = []  # Lista de lives (CCs aprobadas)
-channelid = -1003101739772  # ID del canal Team RedCards
+lives_list = []
+channelid = -1003101739772
 approved_count = 0
 declined_count = 0
 app = Flask(__name__)
+
+LIVES_FILE = 'lives_database.json'
+
+# ============ CARGAR LIVES DEL ARCHIVO ============
+
+def load_lives_from_file():
+    """Carga lives guardadas del archivo"""
+    global lives_list
+    if os.path.exists(LIVES_FILE):
+        try:
+            with open(LIVES_FILE, 'r', encoding='utf-8') as f:
+                lives_list = json.load(f)
+                log_messages.append(f"✅ Cargadas {len(lives_list)} LIVES del archivo")
+        except Exception as e:
+            log_messages.append(f"❌ Error cargando lives: {e}")
+            lives_list = []
+    else:
+        lives_list = []
+
+def save_lives_to_file():
+    """Guarda lives en archivo JSON"""
+    try:
+        with open(LIVES_FILE, 'w', encoding='utf-8') as f:
+            json.dump(lives_list, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        log_messages.append(f"❌ Error guardando lives: {e}")
 
 # ============ FUNCIONES UTILITARIAS ============
 
@@ -91,7 +117,7 @@ def generate_cc_variants(ccbase, count=20):
     elif '|' in ccbase:
         separator = '|'
     else:
-        log_messages.append(f"❌ Formato desconocido: {ccbase}")
+        log_messages.append(f"❌ Formato desconocido")
         return []
     
     parts = ccbase.strip().split(separator)
@@ -102,11 +128,11 @@ def generate_cc_variants(ccbase, count=20):
         year = parts[2]
         cvv = parts[3]
     else:
-        log_messages.append(f"❌ Formato inválido: {ccbase}")
+        log_messages.append(f"❌ Formato inválido")
         return []
     
     if len(cardnumber) < 12:
-        log_messages.append(f"❌ Tarjeta muy corta: {cardnumber}")
+        log_messages.append(f"❌ Tarjeta muy corta")
         return []
     
     date_is_valid = is_date_valid(month, year)
@@ -181,7 +207,7 @@ async def response_handler(event):
             elif 'gate:' in line.lower():
                 gate = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
         
-        log_messages.append(f"✅ LIVE ENCONTRADA: {cc_number[:12]}... | {status}")
+        log_messages.append(f"✅ LIVE ENCONTRADA: {cc_number[:12]}...")
         
         formatted_message = f"""╔════════════════════════════════════════╗
            Team RedCards 💳
@@ -197,6 +223,7 @@ async def response_handler(event):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 💵 GATE: {gate}"""
         
+        # Guardar LIVE con fecha
         live_entry = {
             "cc": cc_number,
             "status": status,
@@ -204,12 +231,15 @@ async def response_handler(event):
             "country": country,
             "bank": bank,
             "type": card_type,
-            "gate": gate
+            "gate": gate,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         lives_list.append(live_entry)
+        save_lives_to_file()  # Guardar inmediatamente
         
         if len(lives_list) > 100:
             lives_list.pop(0)
+            save_lives_to_file()
         
         try:
             image_path = 'x1.jpg'
@@ -233,7 +263,7 @@ async def response_handler(event):
     
     elif "❌" in full_message or "declined" in message_lower:
         declined_count += 1
-        log_messages.append(f"❌ DECLINADA: {full_message[:50]}...")
+        log_messages.append(f"❌ DECLINADA")
     
     if len(log_messages) > 100:
         log_messages.pop(0)
@@ -275,7 +305,7 @@ async def send_to_bot():
                     with open('ccs.txt', 'w', encoding='utf-8') as f:
                         f.write("")
                 
-                log_messages.append(f"🔄 Scrapper - Generando 20 CCs del BIN: {current_cc[:12]}...")
+                log_messages.append(f"🔄 Scrapper - Procesando BIN: {current_cc[:12]}...")
                 
                 cc_variants = generate_cc_variants(current_cc, count=20)
                 
@@ -286,7 +316,7 @@ async def send_to_bot():
                 
                 commands = await load_commands()
                 
-                # ENVIAR 2 SIMULTÁNEAMENTE
+                # ENVIAR 2 SIMULTÁNEAMENTE - SIN MOSTRAR COMANDOS
                 for i in range(0, len(cc_variants), 2):
                     pair = cc_variants[i:i+2]
                     tasks = []
@@ -299,7 +329,8 @@ async def send_to_bot():
                             try:
                                 await client.send_message('@Alphachekerbot', msg)
                                 num = i + idx + 1
-                                log_messages.append(f"✓ Scrapper enviado #{num}/20: {msg[:20]}...")
+                                # NO MOSTRAR EL COMANDO COMPLETO, SOLO RESUMEN
+                                log_messages.append(f"✓ Scrapper enviado #{num}/20")
                             except FloodWaitError as e:
                                 log_messages.append(f"⏸️ Esperando {e.seconds}s...")
                                 await asyncio.sleep(e.seconds)
@@ -314,7 +345,7 @@ async def send_to_bot():
                     # Esperar entre lotes
                     await asyncio.sleep(21)
                 
-                log_messages.append(f"🎉 Scrapper - Lote completado: 20/20 CCs enviadas")
+                log_messages.append(f"🎉 Scrapper - Lote completado: 20/20")
             else:
                 log_messages.append("⏳ Sin CCs en cola...")
                 await asyncio.sleep(20)
@@ -379,18 +410,6 @@ def index():
                 border-radius: 20px;
                 border: 3px solid #ff1414;
                 box-shadow: 0 0 40px rgba(255, 20, 20, 0.6), inset 0 0 30px rgba(255, 20, 20, 0.1);
-                position: relative;
-                overflow: hidden;
-            }
-            .header::before {
-                content: '';
-                position: absolute;
-                top: 0;
-                left: 0;
-                right: 0;
-                bottom: 0;
-                background: radial-gradient(circle at 20% 50%, rgba(255, 50, 50, 0.1), transparent);
-                pointer-events: none;
             }
             .header h1 {
                 font-size: 3.5em;
@@ -399,8 +418,6 @@ def index():
                 text-shadow: 0 0 20px rgba(255, 20, 20, 0.8), 0 0 40px rgba(255, 50, 50, 0.5);
                 letter-spacing: 2px;
                 font-weight: 900;
-                z-index: 1;
-                position: relative;
             }
             .header .subtitle {
                 font-size: 1em;
@@ -423,11 +440,11 @@ def index():
                 text-align: center;
                 backdrop-filter: blur(10px);
                 transition: all 0.3s ease;
-                box-shadow: 0 0 20px rgba(255, 20, 20, 0.3), inset 0 0 15px rgba(255, 20, 20, 0.05);
+                box-shadow: 0 0 20px rgba(255, 20, 20, 0.3);
             }
             .stat-box:hover {
                 transform: translateY(-8px) scale(1.05);
-                box-shadow: 0 10px 40px rgba(255, 20, 20, 0.5), inset 0 0 20px rgba(255, 20, 20, 0.15);
+                box-shadow: 0 10px 40px rgba(255, 20, 20, 0.5);
                 border-color: #ffaa00;
             }
             .stat-box h3 {
@@ -475,7 +492,6 @@ def index():
                 border: 2px solid #ff1414;
                 border-radius: 8px;
                 color: #fff;
-                font-size: 1em;
             }
             .search-box input::placeholder {
                 color: rgba(255, 170, 0, 0.6);
@@ -494,10 +510,6 @@ def index():
                 font-weight: bold;
                 cursor: pointer;
                 transition: all 0.2s ease;
-                text-transform: uppercase;
-            }
-            .search-box button:hover {
-                box-shadow: 0 0 20px rgba(255, 170, 0, 0.6);
             }
             .scrapper-container, .lives-container {
                 background: rgba(0, 0, 0, 0.5);
@@ -519,13 +531,9 @@ def index():
             }
             .log-entry.error {
                 color: #ff1414;
-                text-shadow: 0 0 10px rgba(255, 20, 20, 0.5);
             }
             .log-entry.info {
                 color: #ffaa00;
-            }
-            .log-entry.warning {
-                color: #ffd700;
             }
             .live-card {
                 background: linear-gradient(135deg, rgba(0, 255, 0, 0.05) 0%, rgba(50, 150, 50, 0.02) 100%);
@@ -547,24 +555,20 @@ def index():
                 margin-bottom: 10px;
                 font-weight: bold;
                 color: #00ff00;
-                font-size: 1.1em;
-                text-shadow: 0 0 10px rgba(0, 255, 0, 0.4);
             }
             .live-card-info {
                 font-size: 0.9em;
                 color: #ffaa00;
                 margin: 5px 0;
-                padding-left: 5px;
             }
-            /* Scrollbar */
+            .live-card-timestamp {
+                font-size: 0.75em;
+                color: #7f8c8d;
+                margin-top: 8px;
+            }
             .scrapper-container::-webkit-scrollbar,
             .lives-container::-webkit-scrollbar {
                 width: 10px;
-            }
-            .scrapper-container::-webkit-scrollbar-track,
-            .lives-container::-webkit-scrollbar-track {
-                background: rgba(0, 0, 0, 0.3);
-                border-radius: 10px;
             }
             .scrapper-container::-webkit-scrollbar-thumb,
             .lives-container::-webkit-scrollbar-thumb {
@@ -595,7 +599,7 @@ def index():
                     <div class="number" id="declined">{{ declined }}</div>
                 </div>
                 <div class="stat-box">
-                    <h3>💎 ENCONTRADAS</h3>
+                    <h3>💎 GUARDADAS</h3>
                     <div class="number" id="lives-count">0</div>
                 </div>
             </div>
@@ -628,7 +632,7 @@ def index():
                 const livesContainer = document.getElementById('lives');
                 
                 if (!lives || lives.length === 0) {
-                    livesContainer.innerHTML = '<div class="log-entry info">No hay LIVES todavía...</div>';
+                    livesContainer.innerHTML = '<div class="log-entry info">No hay LIVES...</div>';
                     return;
                 }
                 
@@ -644,7 +648,7 @@ def index():
                 }
                 
                 if (filtered.length === 0) {
-                    livesContainer.innerHTML = '<div class="log-entry error">No se encontraron resultados</div>';
+                    livesContainer.innerHTML = '<div class="log-entry error">No encontrado</div>';
                     return;
                 }
                 
@@ -652,12 +656,13 @@ def index():
                     <div class="live-card">
                         <div class="live-card-header">
                             <span>💳 ${live.cc}</span>
-                            <span style="color: #00ff00;">✅ LIVE</span>
+                            <span style="color: #00ff00;">✅</span>
                         </div>
                         <div class="live-card-info">🏦 ${live.bank}</div>
                         <div class="live-card-info">🗺️ ${live.country}</div>
                         <div class="live-card-info">💰 ${live.type}</div>
                         <div class="live-card-info">💵 ${live.gate}</div>
+                        <div class="live-card-timestamp">🕐 ${live.timestamp}</div>
                     </div>
                 `).join('');
             }
@@ -683,7 +688,6 @@ def index():
                                 let className = 'info';
                                 if (line.includes('✓') || line.includes('✅')) className = 'success';
                                 else if (line.includes('❌') || line.includes('Error')) className = 'error';
-                                else if (line.includes('⚠️') || line.includes('⏸️')) className = 'warning';
                                 return `<div class="log-entry ${className}">${line}</div>`;
                             })
                             .join('');
@@ -746,8 +750,13 @@ def health():
 # ============ INICIO ============
 
 if __name__ == '__main__':
+    # Cargar LIVES guardadas
+    load_lives_from_file()
+    
+    # Iniciar Telethon
     telethon_thread = threading.Thread(target=telethon_thread_fn, daemon=True)
     telethon_thread.start()
     time.sleep(2)
     
+    # Iniciar Flask
     app.run('0.0.0.0', PORT, debug=False)

@@ -3,6 +3,7 @@ import asyncio
 import random
 import time
 import os
+from datetime import datetime, timedelta
 from flask import Flask, render_template_string, request, jsonify
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError, RPCError
@@ -23,12 +24,53 @@ PORT = int(os.environ.get('PORT', 5000))
 
 client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 log_messages = []
+lives_list = []  # Lista de lives (CCs aprobadas)
 channelid = -1003101739772  # ID del canal Team RedCards
 approved_count = 0
 declined_count = 0
 app = Flask(__name__)
 
 # ============ FUNCIONES UTILITARIAS ============
+
+def get_current_date():
+    """Obtiene la fecha actual en formato MM/YY"""
+    now = datetime.now()
+    return f"{now.month:02d}/{now.year % 100:02d}"
+
+def is_date_valid(month_year):
+    """Verifica si una fecha MM/YY es válida (no está vencida)"""
+    try:
+        parts = month_year.split('/')
+        if len(parts) != 2:
+            return False
+        
+        month = int(parts[0])
+        year = int(parts[1])
+        
+        # Convertir a año completo (00-30 = 2000-2030, 31-99 = 1931-1999)
+        if year <= 30:
+            year += 2000
+        else:
+            year += 1900
+        
+        # Crear fecha del último día del mes
+        if month == 12:
+            expiry_date = datetime(year + 1, 1, 1) - timedelta(days=1)
+        else:
+            expiry_date = datetime(year, month + 1, 1) - timedelta(days=1)
+        
+        # Comparar con fecha actual
+        return expiry_date >= datetime.now()
+    except:
+        return False
+
+def generate_random_valid_date():
+    """Genera una fecha aleatoria válida (actual o más adelante)"""
+    now = datetime.now()
+    # Generar fecha entre hoy y 5 años en el futuro
+    days_ahead = random.randint(0, 365 * 5)
+    future_date = now + timedelta(days=days_ahead)
+    return f"{future_date.month:02d}/{future_date.year % 100:02d}"
 
 def luhn_checksum(cardnumber):
     """Algoritmo de Luhn para validar tarjetas"""
@@ -51,27 +93,47 @@ def generate_luhn_digit(partial_cardnumber):
             checksum += sum([int(x) for x in str(d * 2)])
     return (10 - (checksum % 10)) % 10
 
-def generate_cc_variants(ccbase, count=10):
-    """Genera variantes de tarjetas con algoritmo de Luhn"""
-    parts = ccbase.strip().split(',')
+def generate_cc_variants(ccbase, count=20):
+    """
+    Genera 20 variantes de tarjetas con todos los datos validados
+    - Si la fecha es vencida, genera una nueva válida
+    - Si la fecha NO es válida, quita 5 dígitos de la tarjeta
+    """
+    parts = ccbase.strip().split('|')
     
-    if len(parts) >= 3:
+    # Parsear datos originales
+    if len(parts) >= 4:
         cardnumber = parts[0]
         month = parts[1]
         year = parts[2]
+        cvv = parts[3]
     else:
-        cardnumber = ccbase
-        month = '12'
-        year = '25'
-    
-    if len(cardnumber) < 12:
+        log_messages.append(f"ERROR: Formato de CC inválido: {ccbase}")
         return []
+    
+    # Verificar longitud de tarjeta
+    if len(cardnumber) < 12:
+        log_messages.append(f"ERROR: Tarjeta muy corta: {cardnumber}")
+        return []
+    
+    # Verificar si la fecha es válida
+    date_str = f"{month}/{year}"
+    is_valid_date = is_date_valid(date_str)
+    
+    # Si la fecha NO es válida, generar una nueva
+    if not is_valid_date:
+        log_messages.append(f"⚠️ Fecha vencida detectada: {date_str}. Generando nueva fecha...")
+        new_date = generate_random_valid_date()
+        month = new_date.split('/')[0]
+        year = new_date.split('/')[1]
+        date_str = f"{month}/{year}"
     
     base_number = cardnumber[:-4]
     variants = []
     attempts = 0
     
-    while len(variants) < count and attempts < count * 3:
+    # Generar 20 variantes
+    while len(variants) < count and attempts < count * 5:
         attempts += 1
         random_digits = str(random.randint(0, 9)) + str(random.randint(0, 9)) + str(random.randint(0, 9))
         partial_number = base_number + random_digits
@@ -79,18 +141,31 @@ def generate_cc_variants(ccbase, count=10):
         complete_number = partial_number + str(luhn_digit)
         
         if luhn_checksum(complete_number) == 0:
-            cvv = random.randint(100, 999)
-            variant = f"{complete_number},{month},{year},{cvv}"
+            # Generar CVV aleatorio (3 dígitos)
+            random_cvv = random.randint(100, 999)
+            
+            # Si la fecha original NO era válida, quitar 5 dígitos de la tarjeta
+            if not is_valid_date:
+                # Quitar 5 dígitos aleatorios y reemplazarlos por X
+                num_list = list(complete_number)
+                indices_to_remove = random.sample(range(4, len(num_list) - 1), 5)
+                for idx in indices_to_remove:
+                    num_list[idx] = 'X'
+                complete_number = ''.join(num_list)
+                log_messages.append(f"⚠️ CC con fecha inválida: {complete_number}|{month}|{year}|{random_cvv}")
+            
+            variant = f"{complete_number}|{month}|{year}|{random_cvv}"
             if variant not in variants:
                 variants.append(variant)
     
+    log_messages.append(f"✓ Generadas {len(variants)} variantes de CC válidas")
     return variants
 
 # ============ MANEJADOR DE EVENTOS ============
 
 async def response_handler(event):
     """Maneja respuestas de mensajes aprobados/rechazados"""
-    global approved_count, declined_count, channelid
+    global approved_count, declined_count, channelid, lives_list
     
     full_message = event.message.message if event.message.message else ""
     message_lower = full_message.lower()
@@ -120,19 +195,36 @@ async def response_handler(event):
             elif 'gate:' in line.lower():
                 gate = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
         
-        # ✅ NUEVO FORMATO - Team RedCards (MEJORADO Y SIMPLIFICADO)
-        formatted_message = f"""╔══════════════════════════╗
-     Team RedCards 💳
-╚══════════════════════════╝
+        # ✅ NUEVO FORMATO - Team RedCards (MEJORADO Y SIMPLIFICADO CON LÍNEAS)
+        formatted_message = f"""╔════════════════════════════════════════╗
+           Team RedCards 💳
+╚════════════════════════════════════════╝
 
-💳 **CC:** `{cc_number}`
-✅ **Status:** {status}
-📊 **Response:** {response}
-
-🗺️ **Country:** {country}
-🏦 **Bank:** {bank}
-💰 **Type:** {card_type}
-💵 **GATE:** {gate}"""
+💳 CC: {cc_number}
+✅ Status: {status}
+📊 Response: {response}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🗺️ Country: {country}
+🏦 Bank: {bank}
+💰 Type: {card_type}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💵 GATE: {gate}"""
+        
+        # Guardar LIVE en la lista
+        live_entry = {
+            "cc": cc_number,
+            "status": status,
+            "country": country,
+            "bank": bank,
+            "type": card_type,
+            "gate": gate,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        lives_list.append(live_entry)
+        
+        # Mantener solo los últimos 100 lives
+        if len(lives_list) > 100:
+            lives_list.pop(0)
         
         # ENVIAR AL CANAL - SIN BOTÓN DE BUY VIP (MEJORADO)
         try:
@@ -182,7 +274,12 @@ async def load_commands():
         return ['/check']
 
 async def send_to_bot():
-    """Envía CCs al bot de Telegram"""
+    """
+    Envía CCs al bot de Telegram
+    - Genera 20 variantes por BIN
+    - Valida fechas y las actualiza si están vencidas
+    - Quita 5 dígitos a las que tienen fecha inválida
+    """
     while True:
         try:
             if not os.path.exists('ccs.txt'):
@@ -204,8 +301,10 @@ async def send_to_bot():
                     with open('ccs.txt', 'w', encoding='utf-8') as f:
                         f.write("")
                 
-                log_messages.append(f"INFO: Generando variantes para {current_cc[:12]}...")
-                cc_variants = generate_cc_variants(current_cc, 10)
+                log_messages.append(f"INFO: Generando 20 variantes para {current_cc[:12]}...")
+                
+                # GENERAR 20 VARIANTES CON VALIDACIÓN DE FECHAS
+                cc_variants = generate_cc_variants(current_cc, count=20)
                 
                 if not cc_variants:
                     log_messages.append(f"ERROR: No se pudieron generar variantes")
@@ -214,6 +313,7 @@ async def send_to_bot():
                 
                 commands = await load_commands()
                 
+                # Enviar las 20 CCs generadas
                 for i in range(0, len(cc_variants), 2):
                     pair = cc_variants[i:i+2]
                     for cc in pair:
@@ -222,7 +322,7 @@ async def send_to_bot():
                         
                         try:
                             await client.send_message('@Alphachekerbot', message)
-                            log_messages.append(f"✓ Enviado: {cc[:12]}...")
+                            log_messages.append(f"✓ Enviado CC #{len(cc_variants) - len(pair) + 1}/20: {cc[:12]}...")
                         except FloodWaitError as e:
                             log_messages.append(f"WARNING: Esperando {e.seconds}s...")
                             await asyncio.sleep(e.seconds)
@@ -230,6 +330,8 @@ async def send_to_bot():
                             log_messages.append(f"ERROR RPC: {e}")
                         
                         await asyncio.sleep(21)
+                
+                log_messages.append(f"✓ Lote completado: 20/20 CCs enviadas")
             else:
                 log_messages.append("INFO: No hay CCs. Esperando...")
                 await asyncio.sleep(20)
@@ -284,7 +386,7 @@ def index():
                 padding: 20px;
             }
             .container {
-                max-width: 1200px;
+                max-width: 1400px;
                 margin: 0 auto;
             }
             .header {
@@ -390,22 +492,47 @@ def index():
             button:active {
                 transform: scale(0.98);
             }
-            .logs-section {
+            .main-content {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 20px;
+                margin-bottom: 30px;
+            }
+            .logs-section, .lives-section {
                 background: rgba(255, 255, 255, 0.05);
                 padding: 25px;
                 border-radius: 10px;
                 border: 1px solid rgba(231, 76, 60, 0.3);
             }
-            .logs-section h2 {
+            .logs-section h2, .lives-section h2 {
                 margin-bottom: 20px;
                 color: #e74c3c;
                 font-size: 1.5em;
             }
-            .logs-container {
+            .search-box {
+                margin-bottom: 15px;
+                display: flex;
+                gap: 10px;
+            }
+            .search-box input {
+                flex: 1;
+                padding: 10px 15px;
+                background: rgba(255, 255, 255, 0.1);
+                border: 1px solid rgba(231, 76, 60, 0.5);
+                border-radius: 5px;
+                color: #fff;
+            }
+            .search-box input::placeholder {
+                color: rgba(255, 255, 255, 0.5);
+            }
+            .search-box button {
+                padding: 10px 20px;
+            }
+            .logs-container, .lives-container {
                 background: rgba(0, 0, 0, 0.3);
                 padding: 15px;
                 border-radius: 5px;
-                height: 400px;
+                height: 500px;
                 overflow-y: auto;
                 font-family: 'Courier New', monospace;
                 font-size: 0.9em;
@@ -430,20 +557,57 @@ def index():
             .log-entry.warning {
                 color: #f39c12;
             }
+            .live-card {
+                background: rgba(255, 255, 255, 0.08);
+                padding: 15px;
+                margin-bottom: 10px;
+                border-radius: 8px;
+                border-left: 3px solid #2ecc71;
+                transition: transform 0.2s ease;
+            }
+            .live-card:hover {
+                transform: translateX(5px);
+            }
+            .live-card-header {
+                display: flex;
+                justify-content: space-between;
+                margin-bottom: 8px;
+                font-weight: bold;
+                color: #2ecc71;
+            }
+            .live-card-info {
+                font-size: 0.85em;
+                color: #bdc3c7;
+                margin: 4px 0;
+            }
+            .live-card-timestamp {
+                font-size: 0.75em;
+                color: #7f8c8d;
+                margin-top: 8px;
+            }
             /* Scrollbar personalizado */
-            .logs-container::-webkit-scrollbar {
+            .logs-container::-webkit-scrollbar,
+            .lives-container::-webkit-scrollbar {
                 width: 8px;
             }
-            .logs-container::-webkit-scrollbar-track {
+            .logs-container::-webkit-scrollbar-track,
+            .lives-container::-webkit-scrollbar-track {
                 background: rgba(0, 0, 0, 0.1);
                 border-radius: 10px;
             }
-            .logs-container::-webkit-scrollbar-thumb {
+            .logs-container::-webkit-scrollbar-thumb,
+            .lives-container::-webkit-scrollbar-thumb {
                 background: #e74c3c;
                 border-radius: 10px;
             }
-            .logs-container::-webkit-scrollbar-thumb:hover {
+            .logs-container::-webkit-scrollbar-thumb:hover,
+            .lives-container::-webkit-scrollbar-thumb:hover {
                 background: #c0392b;
+            }
+            @media (max-width: 1200px) {
+                .main-content {
+                    grid-template-columns: 1fr;
+                }
             }
         </style>
     </head>
@@ -451,7 +615,7 @@ def index():
         <div class="container">
             <div class="header">
                 <h1>💳 Team RedCards</h1>
-                <p>Panel de Control - CC Checker Bot</p>
+                <p>Panel de Control - CC Checker Bot 24/7</p>
             </div>
             
             <div class="stats">
@@ -464,8 +628,8 @@ def index():
                     <div class="number" id="declined">{{ declined }}</div>
                 </div>
                 <div class="stat-box">
-                    <h3>📊 Total</h3>
-                    <div class="number" id="total">{{ approved + declined }}</div>
+                    <h3>💰 LIVES Encontradas</h3>
+                    <div class="number" id="lives-count">0</div>
                 </div>
             </div>
             
@@ -477,10 +641,23 @@ def index():
                 </div>
             </div>
             
-            <div class="logs-section">
-                <h2>📋 Logs en Tiempo Real</h2>
-                <div class="logs-container" id="logs">
-                    {{ log }}
+            <div class="main-content">
+                <div class="logs-section">
+                    <h2>📋 Logs en Tiempo Real</h2>
+                    <div class="logs-container" id="logs">
+                        {{ log }}
+                    </div>
+                </div>
+                
+                <div class="lives-section">
+                    <h2>💰 LIVES Encontradas</h2>
+                    <div class="search-box">
+                        <input type="text" id="search-input" placeholder="Buscar por CC, banco, país...">
+                        <button onclick="searchLives()">Buscar</button>
+                    </div>
+                    <div class="lives-container" id="lives">
+                        <div class="log-entry info">Esperando LIVES...</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -513,6 +690,55 @@ def index():
                 .catch(error => console.error('Error:', error));
             }
             
+            function displayLives(lives, filterText = '') {
+                const livesContainer = document.getElementById('lives');
+                
+                if (!lives || lives.length === 0) {
+                    livesContainer.innerHTML = '<div class="log-entry info">No hay LIVES todavía...</div>';
+                    return;
+                }
+                
+                let filtered = lives;
+                if (filterText) {
+                    filtered = lives.filter(live => 
+                        live.cc.toLowerCase().includes(filterText.toLowerCase()) ||
+                        live.bank.toLowerCase().includes(filterText.toLowerCase()) ||
+                        live.country.toLowerCase().includes(filterText.toLowerCase()) ||
+                        live.type.toLowerCase().includes(filterText.toLowerCase()) ||
+                        live.gate.toLowerCase().includes(filterText.toLowerCase())
+                    );
+                }
+                
+                if (filtered.length === 0) {
+                    livesContainer.innerHTML = '<div class="log-entry error">No se encontraron resultados</div>';
+                    return;
+                }
+                
+                livesContainer.innerHTML = filtered.map(live => `
+                    <div class="live-card">
+                        <div class="live-card-header">
+                            <span>💳 ${live.cc}</span>
+                            <span style="color: #2ecc71;">✅ LIVE</span>
+                        </div>
+                        <div class="live-card-info">🏦 <strong>Banco:</strong> ${live.bank}</div>
+                        <div class="live-card-info">🗺️ <strong>País:</strong> ${live.country}</div>
+                        <div class="live-card-info">💰 <strong>Tipo:</strong> ${live.type}</div>
+                        <div class="live-card-info">💵 <strong>Gate:</strong> ${live.gate}</div>
+                        <div class="live-card-info">✅ <strong>Status:</strong> ${live.status}</div>
+                        <div class="live-card-timestamp">🕐 ${live.timestamp}</div>
+                    </div>
+                `).join('');
+            }
+            
+            function searchLives() {
+                const searchText = document.getElementById('search-input').value;
+                fetch('/get_lives')
+                    .then(response => response.json())
+                    .then(data => {
+                        displayLives(data.lives, searchText);
+                    });
+            }
+            
             function updateLogs() {
                 fetch('/get_logs')
                     .then(response => response.json())
@@ -524,18 +750,29 @@ def index():
                                 if (line.includes('✓') || line.includes('APPROVED')) className = 'approved';
                                 else if (line.includes('✗') || line.includes('DECLINED')) className = 'declined';
                                 else if (line.includes('ERROR')) className = 'error';
-                                else if (line.includes('WARNING')) className = 'warning';
+                                else if (line.includes('WARNING') || line.includes('⚠️')) className = 'warning';
                                 return `<div class="log-entry ${className}">${line}</div>`;
                             })
                             .join('');
                         
                         document.getElementById('approved').textContent = data.approved;
                         document.getElementById('declined').textContent = data.declined;
-                        document.getElementById('total').textContent = data.approved + data.declined;
                         
                         // Auto scroll al final
                         const logsContainer = document.getElementById('logs');
                         logsContainer.scrollTop = logsContainer.scrollHeight;
+                    });
+                
+                // Actualizar lives
+                fetch('/get_lives')
+                    .then(response => response.json())
+                    .then(data => {
+                        document.getElementById('lives-count').textContent = data.lives.length;
+                        displayLives(data.lives);
+                        
+                        // Auto scroll al final
+                        const livesContainer = document.getElementById('lives');
+                        livesContainer.scrollTop = livesContainer.scrollHeight;
                     });
             }
             
@@ -546,6 +783,11 @@ def index():
             // Permitir Enter para cambiar canal
             document.getElementById('channel-input').addEventListener('keypress', function(e) {
                 if (e.key === 'Enter') changeChannel();
+            });
+            
+            // Permitir Enter para buscar
+            document.getElementById('search-input').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') searchLives();
             });
         </script>
     </body>
@@ -574,10 +816,17 @@ def get_logs():
         "declined": declined_count
     })
 
+@app.route('/get_lives')
+def get_lives():
+    """Obtiene la lista de LIVES (CCs aprobadas)"""
+    return jsonify({
+        "lives": lives_list
+    })
+
 @app.route('/health')
 def health():
     """Health check para Railway"""
-    return jsonify({"status": "ok", "approved": approved_count, "declined": declined_count})
+    return jsonify({"status": "ok", "approved": approved_count, "declined": declined_count, "lives": len(lives_list)})
 
 # ============ INICIO ============
 

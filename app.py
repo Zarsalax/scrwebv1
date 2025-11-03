@@ -121,26 +121,20 @@ async def response_handler(event):
             elif 'gate:' in line.lower():
                 gate = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
 
-        # Formato del mensaje
-        formatted_message = f"""
-╔═══════════════════════════╗
-       **SCR VIP RDA** 💳
-╚═══════════════════════════╝
+        # Formato del mensaje MEJORADO - Team RedCards
+formatted_message = f"""╔══════════════════════════╗
+     Team RedCards 💳
+╚══════════════════════════╝
 
-**⋄ ︱ CC:** `{cc_number}`
-**⋄ ︱ Status:** {status}
-**⋄ ︱ Response:** {response}
-- - - - - - - - - - - - - - -
-**⋄ ︱ Country:** {country}
-**⋄ ︱ Bank:** {bank}
-**⋄ ︱ Type:** {card_type}
-- - - - - - - - - - - - - - -
-**⋄ ︱ GATE:** {gate}
+💳 **CC:** `{cc_number}`
+✅ **Status:** {status}
+📊 **Response:** {response}
 
-**╔════════════════╗**
-    🔥 **BUY VIP** 🔥
-**╚════════════════╝**
-"""
+🗺️ **Country:** {country}
+🏦 **Bank:** {bank}
+💰 **Type:** {card_type}
+💵 **GATE:** {gate}"""
+
 
         # ENVIAR AL CANAL CON IMAGEN Y BOTÓN
         try:

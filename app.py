@@ -34,53 +34,67 @@ approved_count = 0
 declined_count = 0
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
+app.permanent_session_lifetime = timedelta(days=7)
 
 LIVES_FILE = 'lives_database.json'
 DB_FILE = 'users.db'
 OWNER_CONFIG_FILE = 'owner_config.json'
 
+# ============ VARIABLES GLOBALES OWNER ============
+OWNER_CONFIG = None
+
 # ============ CONFIGURAR OWNER ============
 
 def init_owner_config():
-    """Inicializa configuración OWNER"""
-    if not os.path.exists(OWNER_CONFIG_FILE):
-        config = {
-            "secret_url": secrets.token_urlsafe(32),
-            "username": "admin",
-            "password": "ChangeMe123!@#",
-            "created_at": datetime.now().isoformat()
-        }
-        try:
-            with open(OWNER_CONFIG_FILE, 'w') as f:
-                json.dump(config, f, indent=2)
-            
-            print(f"\n{'='*70}")
-            print(f"🔐 URL SECRETA OWNER: /secret/{config['secret_url']}/owner_login")
-            print(f"👤 Usuario: {config['username']}")
-            print(f"🔑 Contraseña: {config['password']}")
-            print(f"⚠️ CAMBIAR INMEDIATAMENTE")
-            print(f"{'='*70}\n")
-            
-            return config
-        except Exception as e:
-            print(f"Error: {e}")
-            return None
-    else:
+    """Inicializa configuración OWNER - SE CREA UNA SOLA VEZ"""
+    global OWNER_CONFIG
+    
+    if os.path.exists(OWNER_CONFIG_FILE):
         try:
             with open(OWNER_CONFIG_FILE, 'r') as f:
-                return json.load(f)
+                OWNER_CONFIG = json.load(f)
+                print(f"\n{'='*70}")
+                print(f"✅ Config OWNER cargada exitosamente")
+                print(f"🔐 URL SECRETA: {OWNER_CONFIG['secret_url']}")
+                print(f"👤 Usuario: {OWNER_CONFIG['username']}")
+                print(f"🔑 Contraseña: {OWNER_CONFIG['password']}")
+                print(f"{'='*70}\n")
+                return OWNER_CONFIG
         except:
-            return None
+            pass
+    
+    # CREAR NUEVA CONFIGURACIÓN
+    config = {
+        "secret_url": secrets.token_urlsafe(32),
+        "username": "admin",
+        "password": "ChangeMe123!@#",
+        "created_at": datetime.now().isoformat()
+    }
+    
+    try:
+        with open(OWNER_CONFIG_FILE, 'w') as f:
+            json.dump(config, f, indent=2)
+        
+        OWNER_CONFIG = config
+        
+        print(f"\n{'='*70}")
+        print(f"🔐 URL SECRETA OWNER: /secret/{config['secret_url']}/owner_login")
+        print(f"👤 Usuario: {config['username']}")
+        print(f"🔑 Contraseña: {config['password']}")
+        print(f"⚠️ CAMBIAR INMEDIATAMENTE")
+        print(f"{'='*70}\n")
+        
+        return config
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
 
 def get_owner_config():
-    """Obtiene configuración OWNER"""
-    if not os.path.exists(OWNER_CONFIG_FILE):
-        return init_owner_config()
-    try:
-        with open(OWNER_CONFIG_FILE, 'r') as f:
-            return json.load(f)
-    except:
-        return init_owner_config()
+    """Obtiene la configuración OWNER"""
+    global OWNER_CONFIG
+    if OWNER_CONFIG is None:
+        init_owner_config()
+    return OWNER_CONFIG
 
 # ============ BASE DE DATOS ============
 
@@ -497,6 +511,7 @@ def login():
             reset_failed_attempts(username)
             session['user_id'] = user['id']
             session['username'] = user['username']
+            session.permanent = True
             
             conn = get_db()
             c = conn.cursor()
@@ -526,33 +541,45 @@ def logout():
 def owner_login(secret_url):
     owner_config = get_owner_config()
     
+    print(f"\n[DEBUG] Intentando acceder a owner_login")
+    print(f"[DEBUG] Secret URL recibida: {secret_url}")
+    print(f"[DEBUG] Secret URL esperada: {owner_config.get('secret_url') if owner_config else 'NONE'}")
+    
     if not owner_config or secret_url != owner_config.get('secret_url'):
+        print(f"[ERROR] URLs no coinciden!")
         return "NOT FOUND", 404
     
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
         
-        # VERIFICACIÓN DIRECTA Y SIMPLE - SIN COMPLICACIONES
+        print(f"\n[DEBUG] POST Login - Usuario: {username}")
+        print(f"[DEBUG] Usuario esperado: {owner_config.get('username')}")
+        print(f"[DEBUG] Contraseña recibida: {password}")
+        print(f"[DEBUG] Contraseña esperada: {owner_config.get('password')}")
+        
+        # VERIFICACIÓN EXACTA
         if username != owner_config.get('username'):
+            print(f"[ERROR] Usuario NO coincide")
             return jsonify({'error': 'Usuario INCORRECTO'}), 401
         
         if password != owner_config.get('password'):
+            print(f"[ERROR] Contraseña NO coincide")
             return jsonify({'error': 'Contraseña INCORRECTA'}), 401
         
-        # SI LLEGÓ AQUÍ, LAS CREDENCIALES SON CORRECTAS
+        print(f"[SUCCESS] Credenciales CORRECTAS!")
+        
         session['owner_authenticated'] = True
         session['owner_secret_url'] = secret_url
         session.permanent = True
         
         return jsonify({'success': True, 'redirect': url_for('owner_panel', secret_url=secret_url)})
     
-    html = '''<!DOCTYPE html><html><head><meta charset="UTF-8"><title>🔐 OWNER ACCESS</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:linear-gradient(135deg,#0a0e27 0%,#1a1a3e 50%,#2d1b3d 100%);font-family:Arial,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center}.login-container{background:rgba(20,20,255,0.08);border:3px solid #1414ff;border-radius:20px;padding:50px;width:100%;max-width:400px;box-shadow:0 0 40px rgba(20,20,255,0.6)}.login-container h1{color:#00aaff;margin-bottom:30px;text-align:center;font-size:2em;text-shadow:0 0 15px rgba(0,170,255,0.6)}.form-group{margin-bottom:20px}.form-group label{display:block;color:#00aaff;margin-bottom:8px;font-weight:bold}.form-group input{width:100%;padding:12px;background:rgba(0,0,0,0.3);border:2px solid #1414ff;border-radius:8px;color:#fff}.form-group input:focus{outline:none;border-color:#00aaff;box-shadow:0 0 15px rgba(0,170,255,0.5)}.login-btn{width:100%;padding:12px;background:linear-gradient(135deg,#1414ff 0%,#0000cc 100%);border:2px solid #00aaff;border-radius:8px;color:white;font-weight:bold;cursor:pointer;text-transform:uppercase}.login-btn:hover{transform:scale(1.05)}.error-message{color:#ff6b6b;text-align:center;margin-bottom:20px}</style></head><body><div class="login-container"><h1>🔐 OWNER PANEL</h1><div id="error-msg" class="error-message"></div><form id="login-form"><div class="form-group"><label>👤 Usuario</label><input type="text" id="username" required></div><div class="form-group"><label>🔑 Contraseña</label><input type="password" id="password" required></div><button type="submit" class="login-btn">⚙️ ACCESO OWNER</button></form></div><script>document.getElementById('login-form').addEventListener('submit',function(e){e.preventDefault();fetch('',{method:'POST',body:new FormData(this)}).then(r=>r.json()).then(d=>{if(d.success)window.location.href=d.redirect;else document.getElementById('error-msg').textContent=d.error;});});</script></body></html>'''
+    html = '''<!DOCTYPE html><html><head><meta charset="UTF-8"><title>🔐 OWNER ACCESS</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:linear-gradient(135deg,#0a0e27 0%,#1a1a3e 50%,#2d1b3d 100%);font-family:Arial,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center}.login-container{background:rgba(20,20,255,0.08);border:3px solid #1414ff;border-radius:20px;padding:50px;width:100%;max-width:400px;box-shadow:0 0 40px rgba(20,20,255,0.6)}.login-container h1{color:#00aaff;margin-bottom:30px;text-align:center;font-size:2em;text-shadow:0 0 15px rgba(0,170,255,0.6)}.form-group{margin-bottom:20px}.form-group label{display:block;color:#00aaff;margin-bottom:8px;font-weight:bold}.form-group input{width:100%;padding:12px;background:rgba(0,0,0,0.3);border:2px solid #1414ff;border-radius:8px;color:#fff}.form-group input:focus{outline:none;border-color:#00aaff;box-shadow:0 0 15px rgba(0,170,255,0.5)}.login-btn{width:100%;padding:12px;background:linear-gradient(135deg,#1414ff 0%,#0000cc 100%);border:2px solid #00aaff;border-radius:8px;color:white;font-weight:bold;cursor:pointer;text-transform:uppercase}.login-btn:hover{transform:scale(1.05)}.error-message{color:#ff6b6b;text-align:center;margin-bottom:20px}</style></head><body><div class="login-container"><h1>🔐 OWNER PANEL</h1><div id="error-msg" class="error-message"></div><form id="login-form"><div class="form-group"><label>👤 Usuario</label><input type="text" id="username" required autocomplete="off"></div><div class="form-group"><label>🔑 Contraseña</label><input type="password" id="password" required autocomplete="off"></div><button type="submit" class="login-btn">⚙️ ACCESO OWNER</button></form></div><script>document.getElementById('login-form').addEventListener('submit',function(e){e.preventDefault();console.log('Enviando...');fetch('',{method:'POST',body:new FormData(this)}).then(r=>{console.log('Status:',r.status);return r.json()}).then(d=>{console.log('Response:',d);if(d.success){window.location.href=d.redirect;}else{document.getElementById('error-msg').textContent=d.error;}}).catch(err=>console.error('Error:',err));});</script></body></html>'''
     return render_template_string(html)
 
 @app.route('/secret/<secret_url>/owner_panel')
 def owner_panel(secret_url):
-    # VERIFICAR SESIÓN Y SECRET_URL
     if 'owner_authenticated' not in session or session.get('owner_secret_url') != secret_url:
         return redirect(url_for('owner_login', secret_url=secret_url))
     
@@ -679,7 +706,7 @@ def health():
 
 if __name__ == '__main__':
     init_db()
-    get_owner_config()
+    init_owner_config()  # INICIALIZA DESDEEL PRINCIPIO
     load_lives_from_file()
     
     telethon_thread = threading.Thread(target=telethon_thread_fn, daemon=True)

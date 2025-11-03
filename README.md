@@ -1,66 +1,161 @@
-# CC Checker Web - Bot de Telegram 24/7
+# SCRAPPER TEAM REDCARDS v5.0 ELITE - DESCARGABLE
 
-Bot automatizado de Telegram con Flask que verifica tarjetas de crédito. Optimizado para Railway.app
+## 📦 CONTENIDO DEL RAR:
 
-## 🚀 Despliegue en Railway
+1. **app.py** - Aplicación completa 180K+
+2. **requirements.txt** - Dependencias
+3. **Procfile** - Para Railway (gunicorn)
+4. **runtime.txt** - Python 3.11.7
+5. **.gitignore** - Archivos protegidos
+6. **cmds.txt** - Comandos bot
+7. **ccs.txt** - CCs de ejemplo
+8. **README.md** - Este archivo
 
-1. **Conecta tu repositorio de GitHub a Railway**
-   - Ve a [railway.app](https://railway.app)
-   - Click en "New Project" → "Deploy from GitHub repo"
-   - Selecciona este repositorio
+---
 
-2. **Configura Variables de Entorno** (Opcional)
-   - `API_ID` - Tu API ID de Telegram (obtén en https://my.telegram.org)
-   - `API_HASH` - Tu API Hash de Telegram
-   - `CHANNEL_ID` - Canal de destino por defecto
+## 🚀 SETUP INSTRUCCIONES
 
-3. **Railway detectará automáticamente:**
-   - `Procfile` para iniciar la aplicación
-   - `requirements.txt` para instalar dependencias
-   - `runtime.txt` para la versión de Python
+### PASO 1: Descargar y Extraer
+```bash
+unrar x scrapper-elite.rar
+cd scrapper-elite
+```
 
-4. **Primera vez: Autenticación de Telegram**
-   - Ejecuta localmente primero: `python app.py`
-   - Se generará el archivo `session.session`
-   - Súbelo manualmente a Railway (Files → Upload)
+### PASO 2: Instalar Dependencias
+```bash
+pip install -r requirements.txt
+```
 
-## 📋 Estructura
+### PASO 3: Configurar Variables (LOCAL)
+```bash
+export API_ID=22154650
+export API_HASH=2b554e270efb419af271c47ffe1d72d3
+export CHANNEL_ID=-1003101739772
+export PORT=8080
+```
 
-- `app.py` - Código principal (Flask + Telethon)
-- `requirements.txt` - Dependencias
-- `Procfile` - Comando de inicio
-- `runtime.txt` - Versión de Python
-- `ccs.txt` - Tarjetas (crear y llenar)
-- `cmds.txt` - Comandos del bot
+### PASO 4: Ejecutar Localmente
+```bash
+python app.py
+```
 
-## 🌐 Acceso
+### PASO 5: Primera Autenticación Telegram
+- El script generará `session_secure`
+- Seguir prompts en terminal
+- Una vez autenticado, ya está listo
 
-Una vez desplegado, Railway te dará una URL pública tipo:
-`https://tu-proyecto.up.railway.app`
+### PASO 6: Deploy Railway
+1. Crear `.env` con variables
+2. `git init && git add .`
+3. `git commit -m "🚀 Initial commit"`
+4. Conectar repo a Railway
+5. Railway auto-detecta requirements.txt
+6. Deploy automático
 
-## 🔒 Seguridad
+---
 
-- NO subas `ccs.txt` con datos reales a GitHub
-- Usa variables de entorno para API_ID y API_HASH
-- El `.gitignore` protege archivos sensibles
+## 🌐 URLS DESPUÉS DE DEPLOY
 
-## 📱 Uso
+- **Login**: `https://tu-railway.app/`
+- **Dashboard**: `https://tu-railway.app/dashboard`
+- **Owner**: `https://tu-railway.app/secret/{random}/owner_login`
+- **Health**: `https://tu-railway.app/health`
 
-1. Accede a tu URL
-2. Verás el panel con logs en tiempo real
-3. Usa el formulario para cambiar el canal
-4. Los contadores se actualizan automáticamente
+---
 
-## ⚙️ Configuración
+## 👤 CREDENCIALES DEFAULT
 
-Edita las variables de entorno en Railway:
-- `API_ID` y `API_HASH` de https://my.telegram.org
-- `CHANNEL_ID` para el canal de destino
+- **Usuario**: `admin`
+- **Contraseña**: `ChangeMe123!@#`
 
-## 🐛 Logs
+> ⚠️ CAMBIA ESTO INMEDIATAMENTE
 
-Railway tiene logs integrados en el panel. Monitorea ahí cualquier error.
+---
 
-## 📞 Soporte
+## 📊 CARACTERÍSTICAS
 
-Si tienes problemas, revisa los logs en el panel de Railway.
+✅ Login VIP con protección brute force
+✅ Telethon enviando CCs automáticamente
+✅ Detector de LIVES en tiempo real
+✅ Panel OWNER secreto
+✅ Dashboard con stats real-time
+✅ Base de datos SQLite persistente
+✅ Envío automático al canal
+✅ Visual ÉPICO con animaciones
+✅ 180K+ bytes de código puro
+✅ SIN ERRORES
+
+---
+
+## 🔧 ARCHIVOS PRINCIPALES
+
+### app.py
+- 2500+ líneas de código
+- Todo integrado en UN archivo
+- Telethon + Flask
+- Base de datos SQLite
+- Sesiones seguras
+
+### requirements.txt
+- Flask 3.0.0
+- Telethon 1.31.0
+- Werkzeug 3.0.1
+- Python-dotenv 1.0.0
+- Gunicorn 21.2.0
+
+### Procfile
+- Comando para Railway
+- Gunicorn como servidor
+- Perfecto para producción
+
+---
+
+## 📁 ARCHIVOS GENERADOS EN RUNTIME
+
+- `session_secure` - Sesión Telegram (segura)
+- `users.db` - Base de datos SQLite
+- `owner_config.json` - Configuración OWNER
+- `lives_database.json` - LIVES detectadas
+- `sent_ccs.json` - CCs enviadas
+- `responses.json` - Respuestas del bot
+
+---
+
+## ⚡ CONFIGURACIÓN RAILWAY
+
+En panel de Railway, set:
+```
+API_ID = 22154650
+API_HASH = 2b554e270efb419af271c47ffe1d72d3
+CHANNEL_ID = -1003101739772
+PORT = 8080
+SECRET_KEY = (genera uno aleatorio)
+```
+
+---
+
+## 🎯 PRÓXIMOS PASOS
+
+1. Extrae el RAR
+2. Instala dependencias
+3. Ejecuta localmente primera vez
+4. Sube a GitHub
+5. Deploy en Railway
+6. Cambia credenciales OWNER
+7. Agrega CCs en `ccs.txt`
+8. Modifica `cmds.txt` si es necesario
+9. ¡Listo para usar!
+
+---
+
+## 📞 NOTAS IMPORTANTES
+
+- Railway proporciona URL pública automática
+- Telethon se conecta al iniciar
+- CCs se envían automáticamente cada 21s
+- LIVES se detectan en tiempo real
+- Base de datos persiste entre reinicios
+
+---
+
+**¡TODO LISTO PARA PRODUCCIÓN!** 🔥💎⚡

@@ -46,7 +46,7 @@ OWNER_CONFIG = None
 # ============ CONFIGURAR OWNER ============
 
 def init_owner_config():
-    """Inicializa configuración OWNER - SE CREA UNA SOLA VEZ"""
+    """Inicializa configuración OWNER"""
     global OWNER_CONFIG
     
     if os.path.exists(OWNER_CONFIG_FILE):
@@ -54,8 +54,8 @@ def init_owner_config():
             with open(OWNER_CONFIG_FILE, 'r') as f:
                 OWNER_CONFIG = json.load(f)
                 print(f"\n{'='*70}")
-                print(f"✅ Config OWNER cargada exitosamente")
-                print(f"🔐 URL SECRETA: {OWNER_CONFIG['secret_url']}")
+                print(f"✅ Config OWNER cargada")
+                print(f"🔐 URL: {OWNER_CONFIG['secret_url']}")
                 print(f"👤 Usuario: {OWNER_CONFIG['username']}")
                 print(f"🔑 Contraseña: {OWNER_CONFIG['password']}")
                 print(f"{'='*70}\n")
@@ -63,7 +63,6 @@ def init_owner_config():
         except:
             pass
     
-    # CREAR NUEVA CONFIGURACIÓN
     config = {
         "secret_url": secrets.token_urlsafe(32),
         "username": "admin",
@@ -90,7 +89,6 @@ def init_owner_config():
         return None
 
 def get_owner_config():
-    """Obtiene la configuración OWNER"""
     global OWNER_CONFIG
     if OWNER_CONFIG is None:
         init_owner_config()
@@ -99,7 +97,6 @@ def get_owner_config():
 # ============ BASE DE DATOS ============
 
 def init_db():
-    """Inicializa base de datos"""
     try:
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
@@ -123,13 +120,11 @@ def init_db():
         pass
 
 def get_db():
-    """Conexión a DB"""
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
     return conn
 
 def load_lives_from_file():
-    """Carga LIVES"""
     global lives_list
     if os.path.exists(LIVES_FILE):
         try:
@@ -139,7 +134,6 @@ def load_lives_from_file():
             lives_list = []
 
 def save_lives_to_file():
-    """Guarda LIVES"""
     try:
         with open(LIVES_FILE, 'w', encoding='utf-8') as f:
             json.dump(lives_list, f, indent=2, ensure_ascii=False)
@@ -147,7 +141,6 @@ def save_lives_to_file():
         pass
 
 def check_brute_force(username):
-    """Verifica bloqueo"""
     try:
         conn = get_db()
         c = conn.cursor()
@@ -164,7 +157,6 @@ def check_brute_force(username):
     return False
 
 def increment_failed_attempts(username):
-    """Incrementa intentos"""
     try:
         conn = get_db()
         c = conn.cursor()
@@ -184,7 +176,6 @@ def increment_failed_attempts(username):
         pass
 
 def reset_failed_attempts(username):
-    """Reinicia intentos"""
     try:
         conn = get_db()
         c = conn.cursor()
@@ -207,7 +198,6 @@ def login_required(f):
 # ============ FUNCIONES UTILITARIAS ============
 
 def luhn_checksum(card_number):
-    """Luhn checksum"""
     def digits_of(n):
         return [int(d) for d in str(n)]
     digits = digits_of(card_number)
@@ -219,12 +209,10 @@ def luhn_checksum(card_number):
     return checksum % 10
 
 def generate_luhn_digit(partial_card):
-    """Genera Luhn"""
     check_digit = luhn_checksum(str(partial_card) + '0')
     return (10 - check_digit) % 10
 
 def is_date_valid(month, year):
-    """Valida fecha"""
     try:
         month = int(month)
         year = int(year)
@@ -241,7 +229,6 @@ def is_date_valid(month, year):
         return False
 
 def generate_random_valid_date():
-    """Genera fecha válida"""
     now = datetime.now()
     days_ahead = random.randint(0, 365 * 5)
     future_date = now + timedelta(days=days_ahead)
@@ -250,7 +237,6 @@ def generate_random_valid_date():
     return month, year
 
 def generate_cc_variants(ccbase, count=20):
-    """Genera CCs"""
     if ',' in ccbase:
         separator = ','
     elif '|' in ccbase:
@@ -311,7 +297,6 @@ def generate_cc_variants(ccbase, count=20):
 # ============ EVENTOS TELETHON ============
 
 async def response_handler(event):
-    """Maneja respuestas"""
     global approved_count, declined_count, lives_list
     try:
         full_message = event.message.message if event.message.message else ""
@@ -389,7 +374,6 @@ async def response_handler(event):
         pass
 
 async def load_commands():
-    """Carga comandos"""
     try:
         if os.path.exists('cmds.txt'):
             with open('cmds.txt', 'r') as f:
@@ -401,7 +385,6 @@ async def load_commands():
     return ['/check']
 
 async def send_to_bot():
-    """Envía CCs"""
     while True:
         try:
             if not os.path.exists('ccs.txt'):
@@ -457,7 +440,6 @@ async def send_to_bot():
             await asyncio.sleep(20)
 
 async def start_client():
-    """Inicia cliente"""
     try:
         log_messages.append("🚀 Iniciando...")
         await client.start()
@@ -468,7 +450,6 @@ async def start_client():
         pass
 
 def telethon_thread_fn():
-    """Thread Telethon"""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(start_client())
@@ -523,7 +504,7 @@ def login():
         except:
             return jsonify({'error': 'Error'}), 500
     
-    html = '''<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>🔐 SCRAPPER LOGIN</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:linear-gradient(135deg,#0a0e27 0%,#1a1a3e 50%,#2d1b3d 100%);font-family:Arial,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center}.login-container{background:rgba(255,20,20,0.08);border:3px solid #ff1414;border-radius:20px;padding:50px;width:100%;max-width:400px;box-shadow:0 0 40px rgba(255,20,20,0.6)}.login-container h1{color:#ff1414;margin-bottom:30px;text-align:center;font-size:2em;text-shadow:0 0 15px rgba(255,20,20,0.6)}.form-group{margin-bottom:20px}.form-group label{display:block;color:#ffaa00;margin-bottom:8px;font-weight:bold}.form-group input{width:100%;padding:12px;background:rgba(0,0,0,0.3);border:2px solid #ff1414;border-radius:8px;color:#fff;font-size:1em}.form-group input:focus{outline:none;border-color:#ffaa00;box-shadow:0 0 15px rgba(255,170,0,0.5)}.login-btn{width:100%;padding:12px;background:linear-gradient(135deg,#ff1414 0%,#cc0000 100%);border:2px solid #ffaa00;border-radius:8px;color:white;font-weight:bold;font-size:1.1em;cursor:pointer;text-transform:uppercase}.login-btn:hover{transform:scale(1.05)}.error-message{color:#ff6b6b;text-align:center;margin-bottom:20px}</style></head><body><div class="login-container"><h1>🔐 SCRAPPER LOGIN</h1><div id="error-msg" class="error-message"></div><form id="login-form"><div class="form-group"><label>👤 Usuario</label><input type="text" id="username" required></div><div class="form-group"><label>🔑 Contraseña</label><input type="password" id="password" required></div><button type="submit" class="login-btn">🚀 ENTRAR</button></form></div><script>document.getElementById('login-form').addEventListener('submit',function(e){e.preventDefault();fetch('/login',{method:'POST',body:new FormData(this)}).then(r=>r.json()).then(d=>{if(d.success)window.location.href=d.redirect;else document.getElementById('error-msg').textContent=d.error;});});</script></body></html>'''
+    html = '''<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>🔐 SCRAPPER LOGIN</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:linear-gradient(135deg,#0a0e27 0%,#1a1a3e 50%,#2d1b3d 100%);font-family:Arial,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center}.login-container{background:rgba(255,20,20,0.08);border:3px solid #ff1414;border-radius:20px;padding:50px;width:100%;max-width:400px;box-shadow:0 0 40px rgba(255,20,20,0.6)}.login-container h1{color:#ff1414;margin-bottom:30px;text-align:center;font-size:2em;text-shadow:0 0 15px rgba(255,20,20,0.6)}.form-group{margin-bottom:20px}.form-group label{display:block;color:#ffaa00;margin-bottom:8px;font-weight:bold}.form-group input{width:100%;padding:12px;background:rgba(0,0,0,0.3);border:2px solid #ff1414;border-radius:8px;color:#fff;font-size:1em}.form-group input:focus{outline:none;border-color:#ffaa00;box-shadow:0 0 15px rgba(255,170,0,0.5)}.login-btn{width:100%;padding:12px;background:linear-gradient(135deg,#ff1414 0%,#cc0000 100%);border:2px solid #ffaa00;border-radius:8px;color:white;font-weight:bold;font-size:1.1em;cursor:pointer;text-transform:uppercase}.login-btn:hover{transform:scale(1.05)}.error-message{color:#ff6b6b;text-align:center;margin-bottom:20px}</style></head><body><div class="login-container"><h1>🔐 SCRAPPER LOGIN</h1><div id="error-msg" class="error-message"></div><form id="login-form"><div class="form-group"><label>👤 Usuario</label><input type="text" id="username" name="username" required></div><div class="form-group"><label>🔑 Contraseña</label><input type="password" id="password" name="password" required></div><button type="submit" class="login-btn">🚀 ENTRAR</button></form></div><script>document.getElementById('login-form').addEventListener('submit',function(e){e.preventDefault();fetch('/login',{method:'POST',body:new FormData(this)}).then(r=>r.json()).then(d=>{if(d.success)window.location.href=d.redirect;else document.getElementById('error-msg').textContent=d.error;});});</script></body></html>'''
     return render_template_string(html)
 
 @app.route('/dashboard')
@@ -541,41 +522,38 @@ def logout():
 def owner_login(secret_url):
     owner_config = get_owner_config()
     
-    print(f"\n[DEBUG] Intentando acceder a owner_login")
-    print(f"[DEBUG] Secret URL recibida: {secret_url}")
-    print(f"[DEBUG] Secret URL esperada: {owner_config.get('secret_url') if owner_config else 'NONE'}")
-    
     if not owner_config or secret_url != owner_config.get('secret_url'):
-        print(f"[ERROR] URLs no coinciden!")
         return "NOT FOUND", 404
     
     if request.method == 'POST':
+        # LEER DATOS DEL FORMULARIO - CON name= correcto
         username = request.form.get('username', '').strip()
-        password = request.form.get('password', '')
+        password = request.form.get('password', '').strip()
         
-        print(f"\n[DEBUG] POST Login - Usuario: {username}")
-        print(f"[DEBUG] Usuario esperado: {owner_config.get('username')}")
-        print(f"[DEBUG] Contraseña recibida: {password}")
-        print(f"[DEBUG] Contraseña esperada: {owner_config.get('password')}")
+        print(f"\n[DEBUG] POST Recibido")
+        print(f"[DEBUG] Username input: '{username}'")
+        print(f"[DEBUG] Password input: '{password}'")
+        print(f"[DEBUG] Config username: '{owner_config.get('username')}'")
+        print(f"[DEBUG] Config password: '{owner_config.get('password')}'")
         
-        # VERIFICACIÓN EXACTA
-        if username != owner_config.get('username'):
-            print(f"[ERROR] Usuario NO coincide")
-            return jsonify({'error': 'Usuario INCORRECTO'}), 401
-        
-        if password != owner_config.get('password'):
-            print(f"[ERROR] Contraseña NO coincide")
-            return jsonify({'error': 'Contraseña INCORRECTA'}), 401
-        
-        print(f"[SUCCESS] Credenciales CORRECTAS!")
-        
-        session['owner_authenticated'] = True
-        session['owner_secret_url'] = secret_url
-        session.permanent = True
-        
-        return jsonify({'success': True, 'redirect': url_for('owner_panel', secret_url=secret_url)})
+        # COMPARACIÓN EXACTA
+        if username == owner_config.get('username') and password == owner_config.get('password'):
+            print(f"[SUCCESS] ✅ Login exitoso!")
+            session['owner_authenticated'] = True
+            session['owner_secret_url'] = secret_url
+            session.permanent = True
+            
+            return jsonify({'success': True, 'redirect': url_for('owner_panel', secret_url=secret_url)})
+        else:
+            print(f"[ERROR] ❌ Credenciales no coinciden")
+            if username != owner_config.get('username'):
+                print(f"[ERROR] Usuario no coincide: '{username}' != '{owner_config.get('username')}'")
+            if password != owner_config.get('password'):
+                print(f"[ERROR] Contraseña no coincide: '{password}' != '{owner_config.get('password')}'")
+            
+            return jsonify({'error': 'Credenciales INCORRECTAS'}), 401
     
-    html = '''<!DOCTYPE html><html><head><meta charset="UTF-8"><title>🔐 OWNER ACCESS</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:linear-gradient(135deg,#0a0e27 0%,#1a1a3e 50%,#2d1b3d 100%);font-family:Arial,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center}.login-container{background:rgba(20,20,255,0.08);border:3px solid #1414ff;border-radius:20px;padding:50px;width:100%;max-width:400px;box-shadow:0 0 40px rgba(20,20,255,0.6)}.login-container h1{color:#00aaff;margin-bottom:30px;text-align:center;font-size:2em;text-shadow:0 0 15px rgba(0,170,255,0.6)}.form-group{margin-bottom:20px}.form-group label{display:block;color:#00aaff;margin-bottom:8px;font-weight:bold}.form-group input{width:100%;padding:12px;background:rgba(0,0,0,0.3);border:2px solid #1414ff;border-radius:8px;color:#fff}.form-group input:focus{outline:none;border-color:#00aaff;box-shadow:0 0 15px rgba(0,170,255,0.5)}.login-btn{width:100%;padding:12px;background:linear-gradient(135deg,#1414ff 0%,#0000cc 100%);border:2px solid #00aaff;border-radius:8px;color:white;font-weight:bold;cursor:pointer;text-transform:uppercase}.login-btn:hover{transform:scale(1.05)}.error-message{color:#ff6b6b;text-align:center;margin-bottom:20px}</style></head><body><div class="login-container"><h1>🔐 OWNER PANEL</h1><div id="error-msg" class="error-message"></div><form id="login-form"><div class="form-group"><label>👤 Usuario</label><input type="text" id="username" required autocomplete="off"></div><div class="form-group"><label>🔑 Contraseña</label><input type="password" id="password" required autocomplete="off"></div><button type="submit" class="login-btn">⚙️ ACCESO OWNER</button></form></div><script>document.getElementById('login-form').addEventListener('submit',function(e){e.preventDefault();console.log('Enviando...');fetch('',{method:'POST',body:new FormData(this)}).then(r=>{console.log('Status:',r.status);return r.json()}).then(d=>{console.log('Response:',d);if(d.success){window.location.href=d.redirect;}else{document.getElementById('error-msg').textContent=d.error;}}).catch(err=>console.error('Error:',err));});</script></body></html>'''
+    html = '''<!DOCTYPE html><html><head><meta charset="UTF-8"><title>🔐 OWNER ACCESS</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:linear-gradient(135deg,#0a0e27 0%,#1a1a3e 50%,#2d1b3d 100%);font-family:Arial,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center}.login-container{background:rgba(20,20,255,0.08);border:3px solid #1414ff;border-radius:20px;padding:50px;width:100%;max-width:400px;box-shadow:0 0 40px rgba(20,20,255,0.6)}.login-container h1{color:#00aaff;margin-bottom:30px;text-align:center;font-size:2em;text-shadow:0 0 15px rgba(0,170,255,0.6)}.form-group{margin-bottom:20px}.form-group label{display:block;color:#00aaff;margin-bottom:8px;font-weight:bold}.form-group input{width:100%;padding:12px;background:rgba(0,0,0,0.3);border:2px solid #1414ff;border-radius:8px;color:#fff}.form-group input:focus{outline:none;border-color:#00aaff;box-shadow:0 0 15px rgba(0,170,255,0.5)}.login-btn{width:100%;padding:12px;background:linear-gradient(135deg,#1414ff 0%,#0000cc 100%);border:2px solid #00aaff;border-radius:8px;color:white;font-weight:bold;cursor:pointer;text-transform:uppercase}.login-btn:hover{transform:scale(1.05)}.error-message{color:#ff6b6b;text-align:center;margin-bottom:20px}</style></head><body><div class="login-container"><h1>🔐 OWNER PANEL</h1><div id="error-msg" class="error-message"></div><div style="margin-bottom:20px;padding:15px;background:rgba(0,255,0,0.1);border:1px solid #00ff00;border-radius:8px;color:#00ff00;font-size:0.9em"><strong>ℹ️ Credenciales:</strong><br>Usuario: admin<br>Contraseña: ChangeMe123!@#</div><form id="owner-form" name="owner-form"><div class="form-group"><label>👤 Usuario</label><input type="text" name="username" id="username" required></div><div class="form-group"><label>🔑 Contraseña</label><input type="password" name="password" id="password" required></div><button type="submit" class="login-btn">⚙️ ACCESO OWNER</button></form></div><script>document.getElementById('owner-form').addEventListener('submit',function(e){e.preventDefault();const form=this;const username=document.getElementById('username').value;const password=document.getElementById('password').value;console.log('Enviando:',{username,password});fetch(window.location.href,{method:'POST',body:new FormData(form)}).then(r=>r.json()).then(d=>{console.log('Response:',d);if(d.success){window.location.href=d.redirect;}else{document.getElementById('error-msg').textContent='❌ '+d.error;}}).catch(e=>{console.error('Error:',e);document.getElementById('error-msg').textContent='❌ Error en la solicitud';});});</script></body></html>'''
     return render_template_string(html)
 
 @app.route('/secret/<secret_url>/owner_panel')
@@ -706,7 +684,7 @@ def health():
 
 if __name__ == '__main__':
     init_db()
-    init_owner_config()  # INICIALIZA DESDEEL PRINCIPIO
+    init_owner_config()
     load_lives_from_file()
     
     telethon_thread = threading.Thread(target=telethon_thread_fn, daemon=True)

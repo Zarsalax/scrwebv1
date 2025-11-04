@@ -1,7 +1,6 @@
 """
-FUNCIONES UTILITARIAS
+UTILIDADES
 """
-
 import random
 import hashlib
 import secrets
@@ -55,9 +54,7 @@ class DateValidator:
         now = datetime.now()
         days_ahead = random.randint(0, 365 * 5)
         future_date = now + timedelta(days=days_ahead)
-        month = f"{future_date.month:02d}"
-        year = f"{future_date.year}"
-        return month, year
+        return f"{future_date.month:02d}", str(future_date.year)
 
 class CCGenerator:
     @staticmethod
@@ -73,10 +70,7 @@ class CCGenerator:
         if len(parts) < 4:
             return None, "Formato inválido"
 
-        cardnumber = parts[0]
-        month = parts[1]
-        year = parts[2]
-        cvv = parts[3]
+        cardnumber, month, year, cvv = parts[0], parts[1], parts[2], parts[3]
 
         if len(cardnumber) < 12:
             return None, "Tarjeta muy corta"
@@ -102,9 +96,9 @@ class CCGenerator:
                 random_digits = ''.join([str(random.randint(0, 9)) for _ in range(5)])
                 partial = bin_number + random_digits
                 luhn_digit = LuhnValidator.generate_luhn_digit(partial)
-                complete_number = partial + str(luhn_digit)
-                random_cvv = random.randint(100, 999)
-                variant = f"{complete_number}{separator}{month}{separator}{year}{separator}{random_cvv}"
+                complete = partial + str(luhn_digit)
+                rcvv = random.randint(100, 999)
+                variant = f"{complete}{separator}{month}{separator}{year}{separator}{rcvv}"
                 if variant not in variants:
                     variants.append(variant)
         else:
@@ -113,9 +107,9 @@ class CCGenerator:
                 random_digits = ''.join([str(random.randint(0, 9)) for _ in range(3)])
                 partial = bin_number + random_digits
                 luhn_digit = LuhnValidator.generate_luhn_digit(partial)
-                complete_number = partial + str(luhn_digit)
-                random_cvv = random.randint(100, 999)
-                variant = f"{complete_number}{separator}{month}{separator}{year}{separator}{random_cvv}"
+                complete = partial + str(luhn_digit)
+                rcvv = random.randint(100, 999)
+                variant = f"{complete}{separator}{month}{separator}{year}{separator}{rcvv}"
                 if variant not in variants:
                     variants.append(variant)
 
@@ -140,5 +134,3 @@ class PasswordManager:
     @staticmethod
     def generate_session_token():
         return secrets.token_urlsafe(32)
-
-password_manager = PasswordManager()

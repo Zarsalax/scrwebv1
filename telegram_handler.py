@@ -1,11 +1,9 @@
 """
-MANEJADOR DE EVENTOS TELEGRAM
+MANEJADOR TELEGRAM
 """
-
 from telethon import events
 from telethon.errors import FloodWaitError, RPCError
-from database import lives_mgr
-from utils import logger
+from database import lives_mgr, logger
 from config import CHANNEL_ID
 
 approved_count = 0
@@ -21,30 +19,12 @@ async def setup_event_handlers(client, channel_id):
 
         if "✅" in full_message or "approved" in message_lower:
             approved_count += 1
-            logger.add(f"✅ APPROVED - Contador: {approved_count}")
-
-            lines = full_message.split('\n')
-            cc_number = status = response = country = bank = card_type = gate = ""
-
-            for line in lines:
-                if 'cc:' in line.lower():
-                    cc_number = line.split(':', 1)[1].strip() if ':' in line else ""
-                elif 'status:' in line.lower():
-                    status = line.split(':', 1)[1].strip() if ':' in line else ""
-                elif 'country:' in line.lower():
-                    country = line.split(':', 1)[1].strip() if ':' in line else ""
-                elif 'bank:' in line.lower():
-                    bank = line.split(':', 1)[1].strip() if ':' in line else ""
-
-            if cc_number:
-                logger.add(f"💳 LIVE ENCONTRADA: {cc_number[:12]}...")
-                lives_mgr.add_live(cc_number, status, response, country, bank, card_type, gate)
-
+            logger.add(f"✅ APPROVED - Total: {approved_count}")
         elif "❌" in full_message or "declined" in message_lower:
             declined_count += 1
-            logger.add(f"❌ DECLINED - Contador: {declined_count}")
+            logger.add(f"❌ DECLINED - Total: {declined_count}")
 
-    logger.add(f"✅ Event handlers configurados")
+    logger.add("✅ Event handlers configurados")
 
 def get_statistics():
     return {

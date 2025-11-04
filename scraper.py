@@ -1,15 +1,15 @@
 """
-MÓDULO SCRAPER
+SCRAPER
 """
-
 import asyncio
 import os
 from telethon.errors import FloodWaitError, RPCError
 from config import CC_BATCH_SIZE, CC_SEND_INTERVAL, BOT_USERNAME
-from utils import logger, CCGenerator
+from database import logger
+from utils import CCGenerator
 
 sent_count = 0
-total_batches_processed = 0
+total_batches = 0
 
 async def load_commands():
     try:
@@ -42,7 +42,7 @@ def save_ccs(ccs_list):
         logger.add(f"❌ Error guardando CCs: {e}")
 
 async def send_cc_variants_to_bot(client, cc_variants, commands):
-    global sent_count, total_batches_processed
+    global sent_count, total_batches
 
     try:
         for i in range(0, len(cc_variants), 2):
@@ -61,10 +61,10 @@ async def send_cc_variants_to_bot(client, cc_variants, commands):
                         num = i + idx + 1
                         logger.add(f"✓ Enviado #{num}/{CC_BATCH_SIZE}")
                     except FloodWaitError as e:
-                        logger.add(f"⏸️ Flood wait - esperando {e.seconds}s")
+                        logger.add(f"⏸️ Esperando {e.seconds}s")
                         await asyncio.sleep(e.seconds)
                     except RPCError as e:
-                        logger.add(f"❌ Error RPC: {e}")
+                        logger.add(f"❌ Error: {e}")
 
                 tasks.append(send_single_cc(cc, j))
 
@@ -73,31 +73,31 @@ async def send_cc_variants_to_bot(client, cc_variants, commands):
             if i + 2 < len(cc_variants):
                 await asyncio.sleep(CC_SEND_INTERVAL)
 
-        total_batches_processed += 1
-        logger.add(f"🎉 Lote completado: {CC_BATCH_SIZE}/{CC_BATCH_SIZE}")
+        total_batches += 1
+        logger.add(f"🎉 Lote #{total_batches} completo")
 
     except Exception as e:
-        logger.add(f"❌ Error enviando variantes: {e}")
+        logger.add(f"❌ Error enviando: {e}")
 
 async def scraper_loop(client):
-    logger.add("🚀 Iniciando scraper loop...")
+    logger.add("🚀 Scraper iniciado")
 
     while True:
         try:
             ccs_list = await load_ccs()
 
             if not ccs_list:
-                logger.add("⏳ Esperando CCs en queue...")
+                logger.add("⏳ Esperando CCs...")
                 await asyncio.sleep(30)
                 continue
 
             current_cc = ccs_list[0]
-            logger.add(f"🔄 Procesando BIN: {current_cc[:12]}...")
+            logger.add(f"🔄 Procesando: {current_cc[:12]}...")
 
             cc_variants, error = CCGenerator.generate_variants(current_cc, count=CC_BATCH_SIZE)
 
             if error:
-                logger.add(f"❌ Error generando variantes: {error}")
+                logger.add(f"❌ Error: {error}")
                 ccs_list.pop(0)
                 save_ccs(ccs_list)
                 await asyncio.sleep(20)
@@ -112,12 +112,8 @@ async def scraper_loop(client):
             await asyncio.sleep(CC_SEND_INTERVAL)
 
         except Exception as e:
-            logger.add(f"❌ Error en scraper loop: {e}")
+            logger.add(f"❌ Error scraper: {e}")
             await asyncio.sleep(20)
 
 def get_scraper_stats():
-    return {
-        'sent_count': sent_count,
-        'batches_processed': total_batches_processed,
-        'average_per_batch': CC_BATCH_SIZE
-    }
+    return {'sent_count': sent_count, 'batches': total_batches}

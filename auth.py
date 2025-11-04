@@ -1,13 +1,14 @@
 """
-SISTEMA DE AUTENTICACIÓN
+AUTENTICACIÓN
 """
-
 from functools import wraps
 from datetime import datetime, timedelta
 from flask import request, jsonify
 from config import MAX_LOGIN_ATTEMPTS, LOGIN_ATTEMPT_TIMEOUT, SESSION_TIMEOUT
-from database import db
-from utils import password_manager, logger
+from database import db, logger
+from utils import PasswordManager
+
+password_manager = PasswordManager()
 
 def hash_password(password):
     return password_manager.hash_password(password)
@@ -21,17 +22,16 @@ def generate_session_token():
 def check_brute_force(username):
     failed_attempts = db.get_failed_login_attempts(username, LOGIN_ATTEMPT_TIMEOUT // 60)
     if failed_attempts >= MAX_LOGIN_ATTEMPTS:
-        logger.add(f"⚠️ ALERTA: Demasiados intentos de login para {username}")
+        logger.add(f"⚠️ ALERTA: Demasiados intentos para {username}")
         return True
     return False
 
 def login_user(username, password):
     if check_brute_force(username):
         logger.add(f"❌ Cuenta bloqueada: {username}")
-        return None, "Cuenta temporalmente bloqueada por demasiados intentos"
+        return None, "Cuenta bloqueada por demasiados intentos"
 
     user = db.get_user(username)
-
     if not user:
         db.record_login_attempt(username, False)
         logger.add(f"❌ Usuario no encontrado: {username}")
@@ -64,8 +64,7 @@ def logout_user(session_token):
 def verify_session(session_token):
     if not session_token:
         return None
-    session_data = db.get_session(session_token)
-    return session_data
+    return db.get_session(session_token)
 
 def require_login(f):
     @wraps(f)
@@ -110,7 +109,6 @@ def initialize_default_admin():
     if not db.user_exists(DEFAULT_ADMIN_USER):
         password_hash = hash_password(DEFAULT_ADMIN_PASSWORD)
         db.create_user(DEFAULT_ADMIN_USER, password_hash, role='owner')
-        logger.add(f"✅ Usuario admin creado por defecto")
-        print(f"✅ Usuario 'admin' creado")
+        logger.add(f"✅ Usuario admin creado")
     else:
-        logger.add(f"✅ Usuario admin ya existe")
+        logger.add(f"✅ Usuario admin existe")

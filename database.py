@@ -1,12 +1,31 @@
 """
-GESTIÓN DE BASE DE DATOS SQLITE
+BASE DE DATOS
 """
-
 import sqlite3
 import json
 import os
 from datetime import datetime
-from config import DATABASE_FILE, LIVES_FILE, OWNER_CONFIG_FILE
+from config import DATABASE_FILE, LIVES_FILE
+
+class Logger:
+    def __init__(self, max_messages=100):
+        self.messages = []
+        self.max_messages = max_messages
+
+    def add(self, message):
+        self.messages.append(message)
+        if len(self.messages) > self.max_messages:
+            self.messages.pop(0)
+        print(message)
+
+    def get_all(self):
+        return self.messages
+
+    def get_recent(self, limit=20):
+        return self.messages[-limit:]
+
+    def clear(self):
+        self.messages = []
 
 class DatabaseManager:
     def __init__(self):
@@ -54,16 +73,6 @@ class DatabaseManager:
             )
         ''')
 
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS statistics (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                approved_count INTEGER DEFAULT 0,
-                declined_count INTEGER DEFAULT 0,
-                total_ccs_sent INTEGER DEFAULT 0
-            )
-        ''')
-
         conn.commit()
         conn.close()
 
@@ -84,7 +93,7 @@ class DatabaseManager:
             conn.commit()
             conn.close()
             return True
-        except sqlite3.IntegrityError:
+        except:
             return False
 
     def get_user(self, username):
@@ -183,29 +192,7 @@ class LivesManager:
     def get_all_lives(self):
         return self.lives_list
 
-    def clear_lives(self):
-        self.lives_list = []
-        self.save_lives()
-
-class Logger:
-    def __init__(self, max_messages=100):
-        self.messages = []
-        self.max_messages = max_messages
-
-    def add(self, message):
-        self.messages.append(message)
-        if len(self.messages) > self.max_messages:
-            self.messages.pop(0)
-
-    def get_all(self):
-        return self.messages
-
-    def get_recent(self, limit=20):
-        return self.messages[-limit:]
-
-    def clear(self):
-        self.messages = []
-
+# INSTANCIAS GLOBALES
+logger = Logger()
 db = DatabaseManager()
 lives_mgr = LivesManager()
-logger = Logger()

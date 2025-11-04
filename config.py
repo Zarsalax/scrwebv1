@@ -1,7 +1,6 @@
 """
-CONFIGURACIÓN CENTRALIZADA DEL PROYECTO
+CONFIGURACIÓN
 """
-
 import os
 from dotenv import load_dotenv
 
@@ -19,7 +18,7 @@ except ValueError:
     CHANNEL_ID = CHANNEL_ID_ENV
 
 PORT = int(os.environ.get('PORT', '5000'))
-SECRET_KEY = os.environ.get('SECRET_KEY', 'change_me_in_production_now')
+SECRET_KEY = os.environ.get('SECRET_KEY', 'change_me_in_production')
 FLASK_ENV = os.environ.get('FLASK_ENV', 'development')
 
 PASSWORD_MIN_LENGTH = 8
@@ -29,15 +28,10 @@ SESSION_TIMEOUT = 24 * 60 * 60
 
 DATABASE_FILE = 'users.db'
 LIVES_FILE = 'lives_database.json'
-SENT_CCS_FILE = 'sent_ccs.json'
-OWNER_CONFIG_FILE = 'owner_config.json'
 
 CC_BATCH_SIZE = 20
 CC_SEND_INTERVAL = 21
 MAX_LIVES_STORED = 100
-
-LOG_FILE = 'scraper.log'
-MAX_LOG_MESSAGES = 100
 
 DEFAULT_ADMIN_USER = 'admin'
 DEFAULT_ADMIN_PASSWORD = 'ChangeMe123!@#'

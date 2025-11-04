@@ -1,6 +1,5 @@
-flask==3.0.0
-werkzeug==3.0.1
-telethon==1.31.0
+Flask==3.0.0
+Telethon==1.31.0
+Werkzeug==3.0.1
 python-dotenv==1.0.0
-gunicorn==21.2.0
-requests==2.31.0
+Gunicorn==21.2.0

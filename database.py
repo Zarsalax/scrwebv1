@@ -1,6 +1,3 @@
-"""
-BASE DE DATOS
-"""
 import sqlite3
 import json
 import os
@@ -13,19 +10,15 @@ class Logger:
         self.max_messages = max_messages
 
     def add(self, message):
-        self.messages.append(message)
+        ts = datetime.now().strftime("%H:%M:%S")
+        msg = f"[{ts}] {message}"
+        self.messages.append(msg)
         if len(self.messages) > self.max_messages:
             self.messages.pop(0)
-        print(message)
-
-    def get_all(self):
-        return self.messages
+        print(msg)
 
     def get_recent(self, limit=20):
         return self.messages[-limit:]
-
-    def clear(self):
-        self.messages = []
 
 class DatabaseManager:
     def __init__(self):
@@ -68,8 +61,7 @@ class DatabaseManager:
                 user_id INTEGER NOT NULL,
                 session_token TEXT UNIQUE NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                expires_at TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users(id)
+                expires_at TIMESTAMP
             )
         ''')
 
@@ -174,25 +166,21 @@ class LivesManager:
         with open(self.lives_file, 'w', encoding='utf-8') as f:
             json.dump(self.lives_list, f, indent=2, ensure_ascii=False)
 
-    def add_live(self, cc, status, response, country, bank, card_type, gate):
-        live_entry = {
+    def add_live(self, cc, status='✅', response='', country='', bank='', card_type='', gate=''):
+        live = {
             "cc": cc, "status": status, "response": response,
             "country": country, "bank": bank, "type": card_type,
             "gate": gate, "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
-        self.lives_list.append(live_entry)
+        self.lives_list.append(live)
         if len(self.lives_list) > 100:
             self.lives_list.pop(0)
         self.save_lives()
-        return live_entry
+        return live
 
     def get_recent_lives(self, limit=10):
         return self.lives_list[-limit:]
 
-    def get_all_lives(self):
-        return self.lives_list
-
-# INSTANCIAS GLOBALES
 logger = Logger()
 db = DatabaseManager()
 lives_mgr = LivesManager()

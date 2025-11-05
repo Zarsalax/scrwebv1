@@ -13,8 +13,8 @@ from telethon.errors import FloodWaitError, RPCError
 API_ID = int(os.environ.get('API_ID', '22154650'))
 API_HASH = os.environ.get('API_HASH', '2b554e270efb419af271c47ffe1d72d3')
 SESSION_NAME = 'session'
-
 channel_env = os.environ.get('CHANNEL_ID', '-1003101739772')
+
 try:
     CHANNEL_ID = int(channel_env)
 except ValueError:
@@ -22,18 +22,18 @@ except ValueError:
 
 PORT = int(os.environ.get('PORT', 5000))
 
+# Crear cliente con session.session
 client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
+
 log_messages = []
 lives_list = []
 channelid = -1003101739772
 approved_count = 0
 declined_count = 0
 app = Flask(__name__)
-
 LIVES_FILE = 'lives_database.json'
 
 # ============ CARGAR LIVES DEL ARCHIVO ============
-
 def load_lives_from_file():
     """Carga lives guardadas del archivo"""
     global lives_list
@@ -41,7 +41,7 @@ def load_lives_from_file():
         try:
             with open(LIVES_FILE, 'r', encoding='utf-8') as f:
                 lives_list = json.load(f)
-                log_messages.append(f"✅ Cargadas {len(lives_list)} LIVES del archivo")
+            log_messages.append(f"✅ Cargadas {len(lives_list)} LIVES del archivo")
         except Exception as e:
             log_messages.append(f"❌ Error cargando lives: {e}")
             lives_list = []
@@ -57,18 +57,16 @@ def save_lives_to_file():
         log_messages.append(f"❌ Error guardando lives: {e}")
 
 # ============ FUNCIONES UTILITARIAS ============
-
 def luhn_checksum(card_number):
     """Calcula el checksum de Luhn"""
     def digits_of(n):
         return [int(d) for d in str(n)]
-    
     digits = digits_of(card_number)
     odd_digits = digits[-1::-2]
     even_digits = digits[-2::-2]
     checksum = sum(odd_digits)
     for d in even_digits:
-        checksum += sum(digits_of(d * 2))
+        checksum += sum(digits_of(d*2))
     return checksum % 10
 
 def generate_luhn_digit(partial_card):
@@ -86,17 +84,14 @@ def is_date_valid(month, year):
     try:
         month = int(month)
         year = int(year)
-        
         if year <= 30:
             year += 2000
         elif year <= 99:
             year += 1900
-        
         if month == 12:
             expiry_date = datetime(year + 1, 1, 1) - timedelta(days=1)
         else:
             expiry_date = datetime(year, month + 1, 1) - timedelta(days=1)
-        
         return expiry_date >= datetime.now()
     except:
         return False
@@ -119,9 +114,8 @@ def generate_cc_variants(ccbase, count=20):
     else:
         log_messages.append(f"❌ Formato desconocido")
         return []
-    
+
     parts = ccbase.strip().split(separator)
-    
     if len(parts) >= 4:
         cardnumber = parts[0]
         month = parts[1]
@@ -130,21 +124,19 @@ def generate_cc_variants(ccbase, count=20):
     else:
         log_messages.append(f"❌ Formato inválido")
         return []
-    
+
     if len(cardnumber) < 12:
         log_messages.append(f"❌ Tarjeta muy corta")
         return []
-    
+
     date_is_valid = is_date_valid(month, year)
     variants = []
-    
+
     if not date_is_valid:
         log_messages.append(f"⚠️ Scrapper - Fecha vencida: {month}/{year}")
         month, year = generate_random_valid_date()
         log_messages.append(f"⚠️ Scrapper - Fecha actualizada: {month}/{year}")
-        
         bin_number = cardnumber[:-6]
-        
         for i in range(count):
             random_digits = ''.join([str(random.randint(0, 9)) for _ in range(5)])
             partial = bin_number + random_digits
@@ -152,15 +144,11 @@ def generate_cc_variants(ccbase, count=20):
             complete_number = partial + str(luhn_digit)
             random_cvv = random.randint(100, 999)
             variant = f"{complete_number}{separator}{month}{separator}{year}{separator}{random_cvv}"
-            
             if variant not in variants:
                 variants.append(variant)
-        
         log_messages.append(f"✅ Generadas 20 CCs (Luhn + fecha actualizada)")
-    
     else:
         bin_number = cardnumber[:-4]
-        
         for i in range(count):
             random_digits = ''.join([str(random.randint(0, 9)) for _ in range(3)])
             partial = bin_number + random_digits
@@ -168,29 +156,24 @@ def generate_cc_variants(ccbase, count=20):
             complete_number = partial + str(luhn_digit)
             random_cvv = random.randint(100, 999)
             variant = f"{complete_number}{separator}{month}{separator}{year}{separator}{random_cvv}"
-            
             if variant not in variants:
                 variants.append(variant)
-        
         log_messages.append(f"✅ Generadas 20 CCs (Luhn válido)")
-    
+
     return variants
 
 # ============ MANEJADOR DE EVENTOS ============
-
 async def response_handler(event):
     """Maneja respuestas de mensajes aprobados/rechazados"""
     global approved_count, declined_count, channelid, lives_list
-    
     full_message = event.message.message if event.message.message else ""
     message_lower = full_message.lower()
-    
+
     if "✅" in full_message or "approved" in message_lower:
         approved_count += 1
-        
         lines = full_message.split('\n')
         cc_number = status = response = country = bank = card_type = gate = ""
-        
+
         for line in lines:
             if 'cc:' in line.lower():
                 cc_number = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
@@ -206,11 +189,11 @@ async def response_handler(event):
                 card_type = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
             elif 'gate:' in line.lower():
                 gate = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
-        
+
         log_messages.append(f"✅ LIVE ENCONTRADA: {cc_number[:12]}...")
         
         formatted_message = f"""╔════════════════════════════════════════╗
-           Team RedCards 💳
+Team RedCards 💳
 ╚════════════════════════════════════════╝
 
 💳 CC: {cc_number}
@@ -222,7 +205,7 @@ async def response_handler(event):
 💰 Type: {card_type}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 💵 GATE: {gate}"""
-        
+
         # Guardar LIVE con fecha
         live_entry = {
             "cc": cc_number,
@@ -235,15 +218,14 @@ async def response_handler(event):
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         lives_list.append(live_entry)
-        save_lives_to_file()  # Guardar inmediatamente
-        
+        save_lives_to_file()
+
         if len(lives_list) > 100:
             lives_list.pop(0)
             save_lives_to_file()
-        
+
         try:
             image_path = 'x1.jpg'
-            
             if os.path.exists(image_path):
                 await client.send_file(
                     channelid,
@@ -257,27 +239,25 @@ async def response_handler(event):
                     formatted_message,
                     parse_mode='markdown'
                 )
-        
         except Exception as e:
-            log_messages.append(f"❌ Error: {e}")
-    
+            log_messages.append(f"❌ Error enviando: {e}")
+
     elif "❌" in full_message or "declined" in message_lower:
         declined_count += 1
         log_messages.append(f"❌ DECLINADA")
-    
+
     if len(log_messages) > 100:
         log_messages.pop(0)
 
 # ============ FUNCIONES DE ENVÍO ============
-
 async def load_commands():
     """Carga comandos desde cmds.txt"""
     try:
         if os.path.exists('cmds.txt'):
             with open('cmds.txt', 'r', encoding='utf-8') as f:
                 cmds = [line.strip() for line in f.readlines() if line.strip()]
-                if cmds:
-                    return cmds
+            if cmds:
+                return cmds
         return ['/check', '/validate', '/test']
     except Exception as e:
         log_messages.append(f"❌ Error cargando comandos: {e}")
@@ -291,65 +271,62 @@ async def send_to_bot():
                 log_messages.append("⏳ Esperando ccs.txt...")
                 await asyncio.sleep(30)
                 continue
-            
+
             with open('ccs.txt', 'r', encoding='utf-8') as f:
                 ccs_list = f.readlines()
-            
+
             if ccs_list:
                 current_cc = ccs_list[0].strip()
-                
+
                 if len(ccs_list) > 1:
                     with open('ccs.txt', 'w', encoding='utf-8') as f:
                         f.writelines(ccs_list[1:])
                 else:
                     with open('ccs.txt', 'w', encoding='utf-8') as f:
                         f.write("")
-                
+
                 log_messages.append(f"🔄 Scrapper - Procesando BIN: {current_cc[:12]}...")
-                
                 cc_variants = generate_cc_variants(current_cc, count=20)
-                
+
                 if not cc_variants:
                     log_messages.append(f"❌ Error generando variantes")
                     await asyncio.sleep(20)
                     continue
-                
+
                 commands = await load_commands()
-                
-                # ENVIAR 2 SIMULTÁNEAMENTE - SIN MOSTRAR COMANDOS
+
+                # ENVIAR 2 SIMULTÁNEAMENTE
                 for i in range(0, len(cc_variants), 2):
                     pair = cc_variants[i:i+2]
                     tasks = []
-                    
+
                     for j, cc in enumerate(pair):
                         selected_command = random.choice(commands)
                         message = f"{selected_command} {cc}"
-                        
+
                         async def send_cc(msg, idx):
                             try:
                                 await client.send_message('@Alphachekerbot', msg)
                                 num = i + idx + 1
-                                # NO MOSTRAR EL COMANDO COMPLETO, SOLO RESUMEN
                                 log_messages.append(f"✓ Scrapper enviado #{num}/20")
                             except FloodWaitError as e:
                                 log_messages.append(f"⏸️ Esperando {e.seconds}s...")
                                 await asyncio.sleep(e.seconds)
                             except RPCError as e:
                                 log_messages.append(f"❌ Error: {e}")
-                        
+
                         tasks.append(send_cc(message, j))
-                    
+
                     # Ejecutar ambas al mismo tiempo
                     await asyncio.gather(*tasks)
-                    
                     # Esperar entre lotes
                     await asyncio.sleep(21)
-                
+
                 log_messages.append(f"🎉 Scrapper - Lote completado: 20/20")
             else:
                 log_messages.append("⏳ Sin CCs en cola...")
                 await asyncio.sleep(20)
-        
+
         except Exception as e:
             log_messages.append(f"❌ Error: {e}")
             await asyncio.sleep(20)
@@ -361,6 +338,7 @@ async def start_client():
         await client.start()
         log_messages.append("✅ Scrapper conectado correctamente")
         
+        # Agregar event handler DESPUÉS de start()
         client.add_event_handler(response_handler, events.MessageEdited(chats='@Alphachekerbot'))
         
         await asyncio.gather(send_to_bot(), client.run_until_disconnected())
@@ -373,8 +351,10 @@ def telethon_thread_fn():
     asyncio.set_event_loop(loop)
     loop.run_until_complete(start_client())
 
-# ============ RUTAS FLASK ============
+# ============ CARGAR LIVES AL INICIAR ============
+load_lives_from_file()
 
+# ============ RUTAS FLASK ============
 @app.route('/')
 def index():
     """Panel web principal"""
@@ -384,379 +364,217 @@ def index():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>SCRAPPER TEAM REDCARDS</title>
+        <title>Scrapper - Team RedCards 💳</title>
         <style>
-            * {
-                margin: 0;
-                padding: 0;
-                box-sizing: border-box;
-            }
-            body {
-                background: linear-gradient(135deg, #0a0e27 0%, #1a1a3e 50%, #2d1b3d 100%);
-                font-family: 'Arial Black', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { 
+                background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
                 color: #fff;
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
                 min-height: 100vh;
                 padding: 20px;
             }
             .container {
-                max-width: 1400px;
+                max-width: 1200px;
                 margin: 0 auto;
             }
             .header {
                 text-align: center;
                 margin-bottom: 30px;
-                padding: 40px;
-                background: linear-gradient(135deg, rgba(255, 20, 20, 0.15) 0%, rgba(139, 0, 0, 0.1) 100%);
-                border-radius: 20px;
-                border: 3px solid #ff1414;
-                box-shadow: 0 0 40px rgba(255, 20, 20, 0.6), inset 0 0 30px rgba(255, 20, 20, 0.1);
+                padding: 20px;
+                background: rgba(0,0,0,0.3);
+                border-radius: 10px;
+                border: 2px solid #00ff88;
             }
             .header h1 {
-                font-size: 3.5em;
+                font-size: 2.5em;
                 margin-bottom: 10px;
-                color: #ff1414;
-                text-shadow: 0 0 20px rgba(255, 20, 20, 0.8), 0 0 40px rgba(255, 50, 50, 0.5);
-                letter-spacing: 2px;
-                font-weight: 900;
-            }
-            .header .subtitle {
-                font-size: 1em;
-                color: #ffaa00;
-                text-transform: uppercase;
-                letter-spacing: 3px;
-                font-weight: bold;
+                color: #00ff88;
+                text-shadow: 0 0 10px #00ff88;
             }
             .stats {
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-                gap: 20px;
-                margin-bottom: 30px;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 15px;
+                margin: 20px 0;
             }
             .stat-box {
-                background: linear-gradient(135deg, rgba(255, 20, 20, 0.1) 0%, rgba(139, 0, 0, 0.05) 100%);
-                padding: 30px;
-                border-radius: 15px;
-                border: 2px solid #ff1414;
+                background: rgba(0,0,0,0.4);
+                padding: 20px;
+                border-radius: 8px;
+                border: 1px solid #00ff88;
                 text-align: center;
-                backdrop-filter: blur(10px);
-                transition: all 0.3s ease;
-                box-shadow: 0 0 20px rgba(255, 20, 20, 0.3);
-            }
-            .stat-box:hover {
-                transform: translateY(-8px) scale(1.05);
-                box-shadow: 0 10px 40px rgba(255, 20, 20, 0.5);
-                border-color: #ffaa00;
             }
             .stat-box h3 {
-                color: #ffaa00;
-                margin-bottom: 15px;
-                font-size: 0.95em;
-                text-transform: uppercase;
-                letter-spacing: 1px;
+                color: #00ff88;
+                font-size: 1.2em;
+                margin-bottom: 10px;
             }
             .stat-box .number {
-                font-size: 4em;
-                font-weight: 900;
-                color: #ff1414;
-                text-shadow: 0 0 15px rgba(255, 20, 20, 0.6);
-            }
-            .main-content {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 20px;
-                margin-bottom: 30px;
-            }
-            .scrapper-section, .lives-section {
-                background: linear-gradient(135deg, rgba(255, 20, 20, 0.08) 0%, rgba(139, 0, 0, 0.03) 100%);
-                padding: 25px;
-                border-radius: 15px;
-                border: 2px solid #ff1414;
-                box-shadow: 0 0 15px rgba(255, 20, 20, 0.2);
-            }
-            .scrapper-section h2, .lives-section h2 {
-                margin-bottom: 20px;
-                color: #ffaa00;
-                font-size: 1.8em;
-                text-shadow: 0 0 10px rgba(255, 170, 0, 0.5);
-                letter-spacing: 1px;
-            }
-            .search-box {
-                margin-bottom: 15px;
-                display: flex;
-                gap: 10px;
-            }
-            .search-box input {
-                flex: 1;
-                padding: 12px 15px;
-                background: rgba(0, 0, 0, 0.3);
-                border: 2px solid #ff1414;
-                border-radius: 8px;
+                font-size: 2em;
+                font-weight: bold;
                 color: #fff;
             }
-            .search-box input::placeholder {
-                color: rgba(255, 170, 0, 0.6);
-            }
-            .search-box input:focus {
-                outline: none;
-                border-color: #ffaa00;
-                box-shadow: 0 0 15px rgba(255, 170, 0, 0.5);
-            }
-            .search-box button {
-                padding: 12px 25px;
-                background: linear-gradient(135deg, #ff1414 0%, #cc0000 100%);
-                border: 2px solid #ffaa00;
+            .logs {
+                background: rgba(0,0,0,0.5);
+                padding: 20px;
                 border-radius: 8px;
-                color: white;
-                font-weight: bold;
-                cursor: pointer;
-                transition: all 0.2s ease;
-            }
-            .scrapper-container, .lives-container {
-                background: rgba(0, 0, 0, 0.5);
-                padding: 15px;
-                border-radius: 10px;
-                height: 500px;
+                border: 1px solid #00ff88;
+                margin-top: 20px;
+                max-height: 400px;
                 overflow-y: auto;
-                font-family: 'Courier New', monospace;
-                font-size: 0.9em;
-                line-height: 1.7;
+            }
+            .logs h2 {
+                color: #00ff88;
+                margin-bottom: 15px;
             }
             .log-entry {
-                padding: 8px 0;
-                border-bottom: 1px solid rgba(255, 20, 20, 0.2);
+                padding: 8px;
+                margin: 5px 0;
+                background: rgba(0,255,136,0.05);
+                border-left: 3px solid #00ff88;
+                font-family: 'Courier New', monospace;
+                font-size: 0.9em;
             }
-            .log-entry.success {
-                color: #00ff00;
-                text-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
+            .lives-section {
+                background: rgba(0,0,0,0.5);
+                padding: 20px;
+                border-radius: 8px;
+                border: 1px solid #00ff88;
+                margin-top: 20px;
             }
-            .log-entry.error {
-                color: #ff1414;
+            .lives-section h2 {
+                color: #00ff88;
+                margin-bottom: 15px;
             }
-            .log-entry.info {
-                color: #ffaa00;
+            .lives-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                gap: 15px;
             }
             .live-card {
-                background: linear-gradient(135deg, rgba(0, 255, 0, 0.05) 0%, rgba(50, 150, 50, 0.02) 100%);
+                background: rgba(0,255,136,0.1);
                 padding: 15px;
-                margin-bottom: 10px;
-                border-radius: 10px;
-                border-left: 4px solid #00ff00;
-                border-bottom: 2px solid #ff1414;
-                transition: all 0.2s ease;
+                border-radius: 6px;
+                border: 1px solid #00ff88;
             }
-            .live-card:hover {
-                transform: translateX(8px);
-                box-shadow: 0 0 20px rgba(0, 255, 0, 0.3);
-                border-left: 4px solid #ffaa00;
+            .live-card strong {
+                color: #00ff88;
             }
-            .live-card-header {
-                display: flex;
-                justify-content: space-between;
-                margin-bottom: 10px;
-                font-weight: bold;
-                color: #00ff00;
+            ::-webkit-scrollbar {
+                width: 8px;
             }
-            .live-card-info {
-                font-size: 0.9em;
-                color: #ffaa00;
-                margin: 5px 0;
+            ::-webkit-scrollbar-track {
+                background: rgba(0,0,0,0.3);
             }
-            .live-card-timestamp {
-                font-size: 0.75em;
-                color: #7f8c8d;
-                margin-top: 8px;
-            }
-            .scrapper-container::-webkit-scrollbar,
-            .lives-container::-webkit-scrollbar {
-                width: 10px;
-            }
-            .scrapper-container::-webkit-scrollbar-thumb,
-            .lives-container::-webkit-scrollbar-thumb {
-                background: linear-gradient(135deg, #ff1414 0%, #ffaa00 100%);
-                border-radius: 10px;
-            }
-            @media (max-width: 1200px) {
-                .main-content {
-                    grid-template-columns: 1fr;
-                }
+            ::-webkit-scrollbar-thumb {
+                background: #00ff88;
+                border-radius: 4px;
             }
         </style>
     </head>
     <body>
         <div class="container">
             <div class="header">
-                <h1>🎮 SCRAPPER TEAM REDCARDS 🔴</h1>
-                <div class="subtitle">⚡ Elite Checker System ⚡</div>
+                <h1>🔥 Scrapper - Team RedCards 💳</h1>
+                <p>Sistema de validación de tarjetas en tiempo real</p>
             </div>
-            
+
             <div class="stats">
                 <div class="stat-box">
                     <h3>✅ LIVES</h3>
-                    <div class="number" id="approved">{{ approved }}</div>
+                    <div class="number" id="approved">0</div>
                 </div>
                 <div class="stat-box">
                     <h3>❌ DECLINADAS</h3>
-                    <div class="number" id="declined">{{ declined }}</div>
+                    <div class="number" id="declined">0</div>
                 </div>
                 <div class="stat-box">
-                    <h3>💎 GUARDADAS</h3>
-                    <div class="number" id="lives-count">0</div>
+                    <h3>📊 TOTAL</h3>
+                    <div class="number" id="total">0</div>
                 </div>
             </div>
-            
-            <div class="main-content">
-                <div class="scrapper-section">
-                    <h2>🔄 SCRAPPER</h2>
-                    <div class="scrapper-container" id="scrapper">
-                        {{ log }}
-                    </div>
-                </div>
-                
-                <div class="lives-section">
-                    <h2>💎 LIVES ENCONTRADAS</h2>
-                    <div class="search-box">
-                        <input type="text" id="search-input" placeholder="🔍 Buscar LIVE...">
-                        <button onclick="searchLives()">🔎</button>
-                    </div>
-                    <div class="lives-container" id="lives">
-                        <div class="log-entry info">Esperando LIVES...</div>
-                    </div>
-                </div>
+
+            <div class="logs">
+                <h2>📝 LOG EN VIVO</h2>
+                <div id="logContainer"></div>
+            </div>
+
+            <div class="lives-section">
+                <h2>💰 LIVES ENCONTRADAS</h2>
+                <div class="lives-grid" id="livesContainer"></div>
             </div>
         </div>
-        
+
         <script>
-            let isSearching = false;
-            
-            function displayLives(lives, filterText = '') {
-                const livesContainer = document.getElementById('lives');
-                
-                if (!lives || lives.length === 0) {
-                    livesContainer.innerHTML = '<div class="log-entry info">No hay LIVES...</div>';
-                    return;
-                }
-                
-                let filtered = lives;
-                if (filterText) {
-                    filtered = lives.filter(live => 
-                        live.cc.toLowerCase().includes(filterText.toLowerCase()) ||
-                        live.bank.toLowerCase().includes(filterText.toLowerCase()) ||
-                        live.country.toLowerCase().includes(filterText.toLowerCase()) ||
-                        live.type.toLowerCase().includes(filterText.toLowerCase()) ||
-                        live.gate.toLowerCase().includes(filterText.toLowerCase())
-                    );
-                }
-                
-                if (filtered.length === 0) {
-                    livesContainer.innerHTML = '<div class="log-entry error">No encontrado</div>';
-                    return;
-                }
-                
-                livesContainer.innerHTML = filtered.map(live => `
-                    <div class="live-card">
-                        <div class="live-card-header">
-                            <span>💳 ${live.cc}</span>
-                            <span style="color: #00ff00;">✅</span>
-                        </div>
-                        <div class="live-card-info">🏦 ${live.bank}</div>
-                        <div class="live-card-info">🗺️ ${live.country}</div>
-                        <div class="live-card-info">💰 ${live.type}</div>
-                        <div class="live-card-info">💵 ${live.gate}</div>
-                        <div class="live-card-timestamp">🕐 ${live.timestamp}</div>
-                    </div>
-                `).join('');
-            }
-            
-            function searchLives() {
-                const searchText = document.getElementById('search-input').value;
-                isSearching = searchText.length > 0;
-                
-                fetch('/get_lives')
-                    .then(response => response.json())
-                    .then(data => {
-                        displayLives(data.lives, searchText);
-                    });
-            }
-            
-            function updateLogs() {
-                fetch('/get_logs')
-                    .then(response => response.json())
-                    .then(data => {
-                        document.getElementById('scrapper').innerHTML = data.log
-                            .split('\\n')
-                            .map(line => {
-                                let className = 'info';
-                                if (line.includes('✓') || line.includes('✅')) className = 'success';
-                                else if (line.includes('❌') || line.includes('Error')) className = 'error';
-                                return `<div class="log-entry ${className}">${line}</div>`;
-                            })
-                            .join('');
-                        
-                        document.getElementById('approved').textContent = data.approved;
-                        document.getElementById('declined').textContent = data.declined;
-                        
-                        const scrapper = document.getElementById('scrapper');
-                        scrapper.scrollTop = scrapper.scrollHeight;
-                    });
-                
-                if (!isSearching) {
-                    fetch('/get_lives')
-                        .then(response => response.json())
-                        .then(data => {
-                            document.getElementById('lives-count').textContent = data.lives.length;
-                            displayLives(data.lives);
-                            
-                            const lives = document.getElementById('lives');
-                            lives.scrollTop = lives.scrollHeight;
-                        });
+            async function updateDashboard() {
+                try {
+                    const res = await fetch('/api/stats');
+                    const data = await res.json();
+                    
+                    document.getElementById('approved').textContent = data.approved;
+                    document.getElementById('declined').textContent = data.declined;
+                    document.getElementById('total').textContent = data.total;
+                    
+                    const logContainer = document.getElementById('logContainer');
+                    logContainer.innerHTML = data.logs
+                        .reverse()
+                        .map(log => `<div class="log-entry">${log}</div>`)
+                        .join('');
+                    logContainer.scrollTop = logContainer.scrollHeight;
+
+                    const livesContainer = document.getElementById('livesContainer');
+                    if (data.lives.length === 0) {
+                        livesContainer.innerHTML = '<p>Sin lives aún...</p>';
+                    } else {
+                        livesContainer.innerHTML = data.lives
+                            .reverse()
+                            .map(live => `
+                                <div class="live-card">
+                                    <div><strong>CC:</strong> ${live.cc}</div>
+                                    <div><strong>Status:</strong> ${live.status}</div>
+                                    <div><strong>Country:</strong> ${live.country}</div>
+                                    <div><strong>Bank:</strong> ${live.bank}</div>
+                                    <div><strong>Gate:</strong> ${live.gate}</div>
+                                    <div><strong>Hora:</strong> ${live.timestamp}</div>
+                                </div>
+                            `).join('');
+                    }
+                } catch (e) {
+                    console.error('Error actualizando:', e);
                 }
             }
-            
-            document.addEventListener('DOMContentLoaded', function() {
-                document.getElementById('search-input').addEventListener('keypress', function(e) {
-                    if (e.key === 'Enter') searchLives();
-                });
-                
-                setInterval(updateLogs, 3000);
-                updateLogs();
-            });
+
+            setInterval(updateDashboard, 2000);
+            updateDashboard();
         </script>
     </body>
     </html>
     '''
-    return render_template_string(html, log='\n'.join(log_messages[-50:]), approved=approved_count, declined=declined_count)
+    return render_template_string(html)
 
-@app.route('/get_logs')
-def get_logs():
-    """Obtiene los logs actuales en JSON"""
+@app.route('/api/stats')
+def get_stats():
+    """API para obtener estadísticas"""
     return jsonify({
-        "log": '\n'.join(log_messages[-50:]),
-        "approved": approved_count,
-        "declined": declined_count
+        'approved': approved_count,
+        'declined': declined_count,
+        'total': approved_count + declined_count,
+        'logs': log_messages[-50:],
+        'lives': lives_list[-20:]
     })
 
-@app.route('/get_lives')
-def get_lives():
-    """Obtiene la lista de LIVES (CCs aprobadas)"""
-    return jsonify({
-        "lives": lives_list
-    })
-
-@app.route('/health')
-def health():
-    """Health check para Railway"""
-    return jsonify({"status": "ok", "approved": approved_count, "declined": declined_count, "lives": len(lives_list)})
-
-# ============ INICIO ============
-
+# ============ INICIAR APLICACIÓN ============
 if __name__ == '__main__':
-    # Cargar LIVES guardadas
-    load_lives_from_file()
-    
-    # Iniciar Telethon
-    telethon_thread = threading.Thread(target=telethon_thread_fn, daemon=True)
-    telethon_thread.start()
-    time.sleep(2)
-    
-    # Iniciar Flask
-    app.run('0.0.0.0', PORT, debug=False)
+    try:
+        # Inicia el hilo de Telethon
+        telethon_thread = threading.Thread(target=telethon_thread_fn, daemon=True)
+        telethon_thread.start()
+        
+        # Inicia Flask
+        log_messages.append("🚀 Panel web iniciado...")
+        app.run(host='0.0.0.0', port=PORT, debug=False)
+    except KeyboardInterrupt:
+        log_messages.append("❌ Aplicación detenida")
+    except Exception as e:
+        log_messages.append(f"❌ Error fatal: {e}")

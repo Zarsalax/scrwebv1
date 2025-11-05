@@ -22,7 +22,7 @@ except ValueError:
 
 PORT = int(os.environ.get('PORT', 5000))
 
-# Crear cliente con session.session
+# Crear cliente
 client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 
 log_messages = []
@@ -74,13 +74,8 @@ def generate_luhn_digit(partial_card):
     check_digit = luhn_checksum(str(partial_card) + '0')
     return (10 - check_digit) % 10
 
-def get_current_date():
-    """Obtiene la fecha actual en formato MM/YY"""
-    now = datetime.now()
-    return f"{now.month:02d}/{now.year % 100:02d}"
-
 def is_date_valid(month, year):
-    """Verifica si una fecha MM/YY es válida (no está vencida)"""
+    """Verifica si una fecha MM/YY es válida"""
     try:
         month = int(month)
         year = int(year)
@@ -190,23 +185,8 @@ async def response_handler(event):
             elif 'gate:' in line.lower():
                 gate = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
 
-        log_messages.append(f"✅ LIVE ENCONTRADA: {cc_number[:12]}...")
+        log_messages.append(f"✅ LIVE: {cc_number[:12]}...")
         
-        formatted_message = f"""╔════════════════════════════════════════╗
-Team RedCards 💳
-╚════════════════════════════════════════╝
-
-💳 CC: {cc_number}
-✅ Status: {status}
-📊 Response: {response}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🗺️ Country: {country}
-🏦 Bank: {bank}
-💰 Type: {card_type}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-💵 GATE: {gate}"""
-
-        # Guardar LIVE con fecha
         live_entry = {
             "cc": cc_number,
             "status": status,
@@ -223,24 +203,6 @@ Team RedCards 💳
         if len(lives_list) > 100:
             lives_list.pop(0)
             save_lives_to_file()
-
-        try:
-            image_path = 'x1.jpg'
-            if os.path.exists(image_path):
-                await client.send_file(
-                    channelid,
-                    image_path,
-                    caption=formatted_message,
-                    parse_mode='markdown'
-                )
-            else:
-                await client.send_message(
-                    channelid,
-                    formatted_message,
-                    parse_mode='markdown'
-                )
-        except Exception as e:
-            log_messages.append(f"❌ Error enviando: {e}")
 
     elif "❌" in full_message or "declined" in message_lower:
         declined_count += 1
@@ -285,7 +247,7 @@ async def send_to_bot():
                     with open('ccs.txt', 'w', encoding='utf-8') as f:
                         f.write("")
 
-                log_messages.append(f"🔄 Scrapper - Procesando BIN: {current_cc[:12]}...")
+                log_messages.append(f"🔄 Scrapper - Procesando: {current_cc[:12]}...")
                 cc_variants = generate_cc_variants(current_cc, count=20)
 
                 if not cc_variants:
@@ -308,7 +270,7 @@ async def send_to_bot():
                             try:
                                 await client.send_message('@Alphachekerbot', msg)
                                 num = i + idx + 1
-                                log_messages.append(f"✓ Scrapper enviado #{num}/20")
+                                log_messages.append(f"✓ Enviado #{num}/20")
                             except FloodWaitError as e:
                                 log_messages.append(f"⏸️ Esperando {e.seconds}s...")
                                 await asyncio.sleep(e.seconds)
@@ -317,12 +279,10 @@ async def send_to_bot():
 
                         tasks.append(send_cc(message, j))
 
-                    # Ejecutar ambas al mismo tiempo
                     await asyncio.gather(*tasks)
-                    # Esperar entre lotes
                     await asyncio.sleep(21)
 
-                log_messages.append(f"🎉 Scrapper - Lote completado: 20/20")
+                log_messages.append(f"🎉 Lote completado: 20/20")
             else:
                 log_messages.append("⏳ Sin CCs en cola...")
                 await asyncio.sleep(20)
@@ -332,249 +292,216 @@ async def send_to_bot():
             await asyncio.sleep(20)
 
 async def start_client():
-    """Inicia el cliente de Telegram"""
+    """Inicia el cliente de Telegram - SIN PEDIR TELÉFONO"""
     try:
         log_messages.append("🚀 Iniciando Scrapper...")
-        await client.start()
-        log_messages.append("✅ Scrapper conectado correctamente")
         
-        # Agregar event handler DESPUÉS de start()
+        # Si ya existe sesión, no pide teléfono
+        if client.is_connected():
+            log_messages.append("✅ Scrapper ya conectado")
+        else:
+            await client.start()
+            log_messages.append("✅ Scrapper conectado")
+        
         client.add_event_handler(response_handler, events.MessageEdited(chats='@Alphachekerbot'))
-        
         await asyncio.gather(send_to_bot(), client.run_until_disconnected())
     except Exception as e:
         log_messages.append(f"❌ Error: {e}")
 
 def telethon_thread_fn():
-    """Ejecuta el cliente de Telegram en un hilo separado"""
+    """Ejecuta Telethon en hilo separado"""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    loop.run_until_complete(start_client())
+    try:
+        loop.run_until_complete(start_client())
+    except:
+        pass
 
-# ============ CARGAR LIVES AL INICIAR ============
+# Cargar lives al iniciar
 load_lives_from_file()
 
 # ============ RUTAS FLASK ============
 @app.route('/')
 def index():
-    """Panel web principal"""
+    """Panel principal"""
     html = '''
     <!DOCTYPE html>
-    <html lang="es">
+    <html>
     <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Scrapper - Team RedCards 💳</title>
+        <title>Scrapper Control</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
             body { 
-                background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+                background: #0a0a0a;
                 color: #fff;
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                min-height: 100vh;
+                font-family: monospace;
                 padding: 20px;
             }
-            .container {
-                max-width: 1200px;
-                margin: 0 auto;
-            }
+            .container { max-width: 1200px; margin: 0 auto; }
             .header {
                 text-align: center;
-                margin-bottom: 30px;
                 padding: 20px;
-                background: rgba(0,0,0,0.3);
-                border-radius: 10px;
+                background: #1a1a1a;
                 border: 2px solid #00ff88;
+                margin-bottom: 20px;
+                border-radius: 5px;
             }
-            .header h1 {
-                font-size: 2.5em;
-                margin-bottom: 10px;
-                color: #00ff88;
-                text-shadow: 0 0 10px #00ff88;
-            }
+            .header h1 { color: #00ff88; font-size: 2em; }
             .stats {
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                gap: 15px;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 10px;
                 margin: 20px 0;
             }
-            .stat-box {
-                background: rgba(0,0,0,0.4);
-                padding: 20px;
-                border-radius: 8px;
+            .stat {
+                background: #1a1a1a;
+                padding: 15px;
                 border: 1px solid #00ff88;
                 text-align: center;
+                border-radius: 5px;
             }
-            .stat-box h3 {
-                color: #00ff88;
-                font-size: 1.2em;
-                margin-bottom: 10px;
-            }
-            .stat-box .number {
-                font-size: 2em;
-                font-weight: bold;
-                color: #fff;
-            }
+            .stat-num { font-size: 2em; color: #00ff88; font-weight: bold; }
             .logs {
-                background: rgba(0,0,0,0.5);
-                padding: 20px;
-                border-radius: 8px;
+                background: #1a1a1a;
                 border: 1px solid #00ff88;
-                margin-top: 20px;
-                max-height: 400px;
+                padding: 10px;
+                height: 300px;
                 overflow-y: auto;
+                margin: 20px 0;
+                border-radius: 5px;
             }
-            .logs h2 {
-                color: #00ff88;
-                margin-bottom: 15px;
-            }
-            .log-entry {
-                padding: 8px;
-                margin: 5px 0;
-                background: rgba(0,255,136,0.05);
-                border-left: 3px solid #00ff88;
-                font-family: 'Courier New', monospace;
+            .log-line { 
+                padding: 2px 0;
+                border-bottom: 1px solid #333;
                 font-size: 0.9em;
             }
-            .lives-section {
-                background: rgba(0,0,0,0.5);
-                padding: 20px;
-                border-radius: 8px;
+            .lives {
+                background: #1a1a1a;
                 border: 1px solid #00ff88;
-                margin-top: 20px;
+                padding: 10px;
+                height: 400px;
+                overflow-y: auto;
+                margin: 20px 0;
+                border-radius: 5px;
             }
-            .lives-section h2 {
-                color: #00ff88;
-                margin-bottom: 15px;
+            .live-item {
+                background: #0a3a0a;
+                padding: 10px;
+                margin: 5px 0;
+                border-left: 3px solid #00ff88;
+                font-size: 0.85em;
             }
-            .lives-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-                gap: 15px;
-            }
-            .live-card {
-                background: rgba(0,255,136,0.1);
-                padding: 15px;
-                border-radius: 6px;
-                border: 1px solid #00ff88;
-            }
-            .live-card strong {
-                color: #00ff88;
-            }
-            ::-webkit-scrollbar {
-                width: 8px;
-            }
-            ::-webkit-scrollbar-track {
-                background: rgba(0,0,0,0.3);
-            }
-            ::-webkit-scrollbar-thumb {
-                background: #00ff88;
-                border-radius: 4px;
-            }
+            h2 { color: #00ff88; margin: 10px 0; }
+            ::-webkit-scrollbar { width: 8px; }
+            ::-webkit-scrollbar-track { background: #1a1a1a; }
+            ::-webkit-scrollbar-thumb { background: #00ff88; }
         </style>
     </head>
     <body>
         <div class="container">
             <div class="header">
-                <h1>🔥 Scrapper - Team RedCards 💳</h1>
-                <p>Sistema de validación de tarjetas en tiempo real</p>
+                <h1>🔥 Scrapper Control 💳</h1>
             </div>
 
             <div class="stats">
-                <div class="stat-box">
-                    <h3>✅ LIVES</h3>
-                    <div class="number" id="approved">0</div>
+                <div class="stat">
+                    <div>✅ LIVES</div>
+                    <div class="stat-num" id="approved">0</div>
                 </div>
-                <div class="stat-box">
-                    <h3>❌ DECLINADAS</h3>
-                    <div class="number" id="declined">0</div>
+                <div class="stat">
+                    <div>❌ DECLINADAS</div>
+                    <div class="stat-num" id="declined">0</div>
                 </div>
-                <div class="stat-box">
-                    <h3>📊 TOTAL</h3>
-                    <div class="number" id="total">0</div>
+                <div class="stat">
+                    <div>📊 TOTAL</div>
+                    <div class="stat-num" id="total">0</div>
                 </div>
             </div>
 
-            <div class="logs">
-                <h2>📝 LOG EN VIVO</h2>
-                <div id="logContainer"></div>
-            </div>
+            <h2>📝 LOG EN VIVO</h2>
+            <div class="logs" id="logs"></div>
 
-            <div class="lives-section">
-                <h2>💰 LIVES ENCONTRADAS</h2>
-                <div class="lives-grid" id="livesContainer"></div>
-            </div>
+            <h2>💰 LIVES ENCONTRADAS</h2>
+            <div class="lives" id="lives"></div>
         </div>
 
         <script>
-            async function updateDashboard() {
-                try {
-                    const res = await fetch('/api/stats');
-                    const data = await res.json();
-                    
-                    document.getElementById('approved').textContent = data.approved;
-                    document.getElementById('declined').textContent = data.declined;
-                    document.getElementById('total').textContent = data.total;
-                    
-                    const logContainer = document.getElementById('logContainer');
-                    logContainer.innerHTML = data.logs
-                        .reverse()
-                        .map(log => `<div class="log-entry">${log}</div>`)
-                        .join('');
-                    logContainer.scrollTop = logContainer.scrollHeight;
+            setInterval(function() {
+                fetch('/get_logs')
+                    .then(r => r.json())
+                    .then(data => {
+                        let html = '';
+                        data.forEach(log => {
+                            html += '<div class="log-line">' + log + '</div>';
+                        });
+                        document.getElementById('logs').innerHTML = html;
+                        document.getElementById('logs').scrollTop = document.getElementById('logs').scrollHeight;
+                    });
+            }, 1000);
 
-                    const livesContainer = document.getElementById('livesContainer');
-                    if (data.lives.length === 0) {
-                        livesContainer.innerHTML = '<p>Sin lives aún...</p>';
-                    } else {
-                        livesContainer.innerHTML = data.lives
-                            .reverse()
-                            .map(live => `
-                                <div class="live-card">
-                                    <div><strong>CC:</strong> ${live.cc}</div>
-                                    <div><strong>Status:</strong> ${live.status}</div>
-                                    <div><strong>Country:</strong> ${live.country}</div>
-                                    <div><strong>Bank:</strong> ${live.bank}</div>
-                                    <div><strong>Gate:</strong> ${live.gate}</div>
-                                    <div><strong>Hora:</strong> ${live.timestamp}</div>
-                                </div>
-                            `).join('');
-                    }
-                } catch (e) {
-                    console.error('Error actualizando:', e);
-                }
-            }
+            setInterval(function() {
+                fetch('/get_lives')
+                    .then(r => r.json())
+                    .then(data => {
+                        let html = '';
+                        data.forEach(live => {
+                            html += '<div class="live-item">' +
+                                '<strong>CC:</strong> ' + live.cc + '<br>' +
+                                '<strong>Status:</strong> ' + live.status + '<br>' +
+                                '<strong>Country:</strong> ' + live.country + '<br>' +
+                                '<strong>Bank:</strong> ' + live.bank + '<br>' +
+                                '<strong>Gate:</strong> ' + live.gate +
+                            '</div>';
+                        });
+                        document.getElementById('lives').innerHTML = html || '<div class="log-line">Sin lives...</div>';
+                    });
+            }, 2000);
 
-            setInterval(updateDashboard, 2000);
-            updateDashboard();
+            setInterval(function() {
+                fetch('/api/stats')
+                    .then(r => r.json())
+                    .then(data => {
+                        document.getElementById('approved').innerText = data.approved;
+                        document.getElementById('declined').innerText = data.declined;
+                        document.getElementById('total').innerText = data.total;
+                    });
+            }, 2000);
         </script>
     </body>
     </html>
     '''
     return render_template_string(html)
 
+@app.route('/get_logs')
+def get_logs():
+    """API para logs"""
+    return jsonify(log_messages[-50:])
+
+@app.route('/get_lives')
+def get_lives():
+    """API para lives"""
+    return jsonify(lives_list[-20:])
+
 @app.route('/api/stats')
 def get_stats():
-    """API para obtener estadísticas"""
+    """API para estadísticas"""
     return jsonify({
         'approved': approved_count,
         'declined': declined_count,
-        'total': approved_count + declined_count,
-        'logs': log_messages[-50:],
-        'lives': lives_list[-20:]
+        'total': approved_count + declined_count
     })
 
-# ============ INICIAR APLICACIÓN ============
+# ============ INICIAR ============
 if __name__ == '__main__':
     try:
-        # Inicia el hilo de Telethon
         telethon_thread = threading.Thread(target=telethon_thread_fn, daemon=True)
         telethon_thread.start()
         
-        # Inicia Flask
         log_messages.append("🚀 Panel web iniciado...")
         app.run(host='0.0.0.0', port=PORT, debug=False)
     except KeyboardInterrupt:
-        log_messages.append("❌ Aplicación detenida")
+        log_messages.append("❌ Detenido")
     except Exception as e:
-        log_messages.append(f"❌ Error fatal: {e}")
+        log_messages.append(f"❌ Error: {e}")

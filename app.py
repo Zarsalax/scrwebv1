@@ -1,762 +1,786 @@
-import threading
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+TEAM REDCARDS - Aplicación Web con Flask
+Owner: @Neokotaro - TEAM-RDA
+Versión: 3.0 WEB
+"""
+
+import subprocess
+import sys
+import os
+
+# Auto-instalador de dependencias
+def instalar_dependencias():
+    dependencias = ['flask', 'telethon', 'requests']
+
+    for dep in dependencias:
+        try:
+            __import__(dep)
+        except ImportError:
+            print(f"📦 Instalando {dep}...")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", dep])
+
+instalar_dependencias()
+
+from flask import Flask, render_template_string, request, jsonify, session
+from telethon import TelegramClient
+from telethon.errors import SessionPasswordNeededError, FloodWaitError
 import asyncio
 import random
 import time
-import os
+from datetime import datetime
 import json
-from datetime import datetime, timedelta
-from flask import Flask, render_template_string, request, jsonify
-from telethon import TelegramClient, events
-from telethon.errors import FloodWaitError, RPCError
+from pathlib import Path
+import secrets
 
-# ============ CONFIGURACIÓN ============
-API_ID = int(os.environ.get('API_ID', '22154650'))
-API_HASH = os.environ.get('API_HASH', '2b554e270efb419af271c47ffe1d72d3')
-SESSION_NAME = 'session'
-
-channel_env = os.environ.get('CHANNEL_ID', '-1003101739772')
-try:
-    CHANNEL_ID = int(channel_env)
-except ValueError:
-    CHANNEL_ID = channel_env
-
-PORT = int(os.environ.get('PORT', 5000))
-
-client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
-log_messages = []
-lives_list = []
-channelid = -1003101739772
-approved_count = 0
-declined_count = 0
 app = Flask(__name__)
+app.secret_key = secrets.token_hex(32)
 
-LIVES_FILE = 'lives_database.json'
+# Configuración Telethon
+API_ID = 22154650
+API_HASH = "2b554e270efb419af271c47ffe1d72d3"
+SESSION_FILE = "teamredcards_web_session"
+BOT_USERNAME = "@Alphachekerbot"
 
-# ============ CARGAR LIVES DEL ARCHIVO ============
+# Variables globales
+client = None
+authenticated = False
+logs = []
+lives = []
+super_lives = []
+stats = {
+    "total_chk": 0,
+    "lives": 0,
+    "super_lives": 0,
+    "deads": 0
+}
+checking_active = False
 
-def load_lives_from_file():
-    """Carga lives guardadas del archivo"""
-    global lives_list
-    if os.path.exists(LIVES_FILE):
-        try:
-            with open(LIVES_FILE, 'r', encoding='utf-8') as f:
-                lives_list = json.load(f)
-                log_messages.append(f"✅ Cargadas {len(lives_list)} LIVES del archivo")
-        except Exception as e:
-            log_messages.append(f"❌ Error cargando lives: {e}")
-            lives_list = []
-    else:
-        lives_list = []
-
-def save_lives_to_file():
-    """Guarda lives en archivo JSON"""
-    try:
-        with open(LIVES_FILE, 'w', encoding='utf-8') as f:
-            json.dump(lives_list, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        log_messages.append(f"❌ Error guardando lives: {e}")
-
-# ============ FUNCIONES UTILITARIAS ============
-
-def luhn_checksum(card_number):
-    """Calcula el checksum de Luhn"""
-    def digits_of(n):
-        return [int(d) for d in str(n)]
-    
-    digits = digits_of(card_number)
-    odd_digits = digits[-1::-2]
-    even_digits = digits[-2::-2]
-    checksum = sum(odd_digits)
-    for d in even_digits:
-        checksum += sum(digits_of(d * 2))
-    return checksum % 10
-
-def generate_luhn_digit(partial_card):
-    """Genera el dígito de verificación de Luhn"""
-    check_digit = luhn_checksum(str(partial_card) + '0')
-    return (10 - check_digit) % 10
-
-def get_current_date():
-    """Obtiene la fecha actual en formato MM/YY"""
-    now = datetime.now()
-    return f"{now.month:02d}/{now.year % 100:02d}"
-
-def is_date_valid(month, year):
-    """Verifica si una fecha MM/YY es válida (no está vencida)"""
-    try:
-        month = int(month)
-        year = int(year)
-        
-        if year <= 30:
-            year += 2000
-        elif year <= 99:
-            year += 1900
-        
-        if month == 12:
-            expiry_date = datetime(year + 1, 1, 1) - timedelta(days=1)
-        else:
-            expiry_date = datetime(year, month + 1, 1) - timedelta(days=1)
-        
-        return expiry_date >= datetime.now()
-    except:
-        return False
-
-def generate_random_valid_date():
-    """Genera una fecha aleatoria válida"""
-    now = datetime.now()
-    days_ahead = random.randint(0, 365 * 5)
-    future_date = now + timedelta(days=days_ahead)
-    month = f"{future_date.month:02d}"
-    year = f"{future_date.year}"
-    return month, year
-
-def generate_cc_variants(ccbase, count=20):
-    """Genera 20 variantes de tarjetas con Luhn"""
-    if ',' in ccbase:
-        separator = ','
-    elif '|' in ccbase:
-        separator = '|'
-    else:
-        log_messages.append(f"❌ Formato desconocido")
-        return []
-    
-    parts = ccbase.strip().split(separator)
-    
-    if len(parts) >= 4:
-        cardnumber = parts[0]
-        month = parts[1]
-        year = parts[2]
-        cvv = parts[3]
-    else:
-        log_messages.append(f"❌ Formato inválido")
-        return []
-    
-    if len(cardnumber) < 12:
-        log_messages.append(f"❌ Tarjeta muy corta")
-        return []
-    
-    date_is_valid = is_date_valid(month, year)
-    variants = []
-    
-    if not date_is_valid:
-        log_messages.append(f"⚠️ Scrapper - Fecha vencida: {month}/{year}")
-        month, year = generate_random_valid_date()
-        log_messages.append(f"⚠️ Scrapper - Fecha actualizada: {month}/{year}")
-        
-        bin_number = cardnumber[:-6]
-        
-        for i in range(count):
-            random_digits = ''.join([str(random.randint(0, 9)) for _ in range(5)])
-            partial = bin_number + random_digits
-            luhn_digit = generate_luhn_digit(partial)
-            complete_number = partial + str(luhn_digit)
-            random_cvv = random.randint(100, 999)
-            variant = f"{complete_number}{separator}{month}{separator}{year}{separator}{random_cvv}"
-            
-            if variant not in variants:
-                variants.append(variant)
-        
-        log_messages.append(f"✅ Generadas 20 CCs (Luhn + fecha actualizada)")
-    
-    else:
-        bin_number = cardnumber[:-4]
-        
-        for i in range(count):
-            random_digits = ''.join([str(random.randint(0, 9)) for _ in range(3)])
-            partial = bin_number + random_digits
-            luhn_digit = generate_luhn_digit(partial)
-            complete_number = partial + str(luhn_digit)
-            random_cvv = random.randint(100, 999)
-            variant = f"{complete_number}{separator}{month}{separator}{year}{separator}{random_cvv}"
-            
-            if variant not in variants:
-                variants.append(variant)
-        
-        log_messages.append(f"✅ Generadas 20 CCs (Luhn válido)")
-    
-    return variants
-
-# ============ MANEJADOR DE EVENTOS ============
-
-async def response_handler(event):
-    """Maneja respuestas de mensajes aprobados/rechazados"""
-    global approved_count, declined_count, channelid, lives_list
-    
-    full_message = event.message.message if event.message.message else ""
-    message_lower = full_message.lower()
-    
-    if "✅" in full_message or "approved" in message_lower:
-        approved_count += 1
-        
-        lines = full_message.split('\n')
-        cc_number = status = response = country = bank = card_type = gate = ""
-        
-        for line in lines:
-            if 'cc:' in line.lower():
-                cc_number = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
-            elif 'status:' in line.lower():
-                status = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
-            elif 'response:' in line.lower():
-                response = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
-            elif 'country:' in line.lower():
-                country = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
-            elif 'bank:' in line.lower():
-                bank = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
-            elif 'type:' in line.lower():
-                card_type = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
-            elif 'gate:' in line.lower():
-                gate = line.split(':', 1)[1].strip() if len(line.split(':', 1)) > 1 else ""
-        
-        log_messages.append(f"✅ LIVE ENCONTRADA: {cc_number[:12]}...")
-        
-        formatted_message = f"""╔════════════════════════════════════════╗
-           Team RedCards 💳
-╚════════════════════════════════════════╝
-
-💳 CC: {cc_number}
-✅ Status: {status}
-📊 Response: {response}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🗺️ Country: {country}
-🏦 Bank: {bank}
-💰 Type: {card_type}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-💵 GATE: {gate}"""
-        
-        # Guardar LIVE con fecha
-        live_entry = {
-            "cc": cc_number,
-            "status": status,
-            "response": response,
-            "country": country,
-            "bank": bank,
-            "type": card_type,
-            "gate": gate,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+# HTML Template con interfaz completa
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TEAM REDCARDS - Web Interface</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
-        lives_list.append(live_entry)
-        save_lives_to_file()  # Guardar inmediatamente
-        
-        if len(lives_list) > 100:
-            lives_list.pop(0)
-            save_lives_to_file()
-        
-        try:
-            image_path = 'x1.jpg'
-            
-            if os.path.exists(image_path):
-                await client.send_file(
-                    channelid,
-                    image_path,
-                    caption=formatted_message,
-                    parse_mode='markdown'
-                )
-            else:
-                await client.send_message(
-                    channelid,
-                    formatted_message,
-                    parse_mode='markdown'
-                )
-        
-        except Exception as e:
-            log_messages.append(f"❌ Error: {e}")
-    
-    elif "❌" in full_message or "declined" in message_lower:
-        declined_count += 1
-        log_messages.append(f"❌ DECLINADA")
-    
-    if len(log_messages) > 100:
-        log_messages.pop(0)
 
-# ============ FUNCIONES DE ENVÍO ============
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0D1117 0%, #1a1a2e 100%);
+            color: #ffffff;
+            min-height: 100vh;
+            padding: 20px;
+        }
 
-async def load_commands():
-    """Carga comandos desde cmds.txt"""
-    try:
-        if os.path.exists('cmds.txt'):
-            with open('cmds.txt', 'r', encoding='utf-8') as f:
-                cmds = [line.strip() for line in f.readlines() if line.strip()]
-                if cmds:
-                    return cmds
-        return ['/check', '/validate', '/test']
-    except Exception as e:
-        log_messages.append(f"❌ Error cargando comandos: {e}")
-        return ['/check']
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
 
-async def send_to_bot():
-    """Envía CCs al bot - 2 simultáneamente"""
-    while True:
-        try:
-            if not os.path.exists('ccs.txt'):
-                log_messages.append("⏳ Esperando ccs.txt...")
-                await asyncio.sleep(30)
-                continue
-            
-            with open('ccs.txt', 'r', encoding='utf-8') as f:
-                ccs_list = f.readlines()
-            
-            if ccs_list:
-                current_cc = ccs_list[0].strip()
-                
-                if len(ccs_list) > 1:
-                    with open('ccs.txt', 'w', encoding='utf-8') as f:
-                        f.writelines(ccs_list[1:])
-                else:
-                    with open('ccs.txt', 'w', encoding='utf-8') as f:
-                        f.write("")
-                
-                log_messages.append(f"🔄 Scrapper - Procesando BIN: {current_cc[:12]}...")
-                
-                cc_variants = generate_cc_variants(current_cc, count=20)
-                
-                if not cc_variants:
-                    log_messages.append(f"❌ Error generando variantes")
-                    await asyncio.sleep(20)
-                    continue
-                
-                commands = await load_commands()
-                
-                # ENVIAR 2 SIMULTÁNEAMENTE - SIN MOSTRAR COMANDOS
-                for i in range(0, len(cc_variants), 2):
-                    pair = cc_variants[i:i+2]
-                    tasks = []
-                    
-                    for j, cc in enumerate(pair):
-                        selected_command = random.choice(commands)
-                        message = f"{selected_command} {cc}"
-                        
-                        async def send_cc(msg, idx):
-                            try:
-                                await client.send_message('@Alphachekerbot', msg)
-                                num = i + idx + 1
-                                # NO MOSTRAR EL COMANDO COMPLETO, SOLO RESUMEN
-                                log_messages.append(f"✓ Scrapper enviado #{num}/20")
-                            except FloodWaitError as e:
-                                log_messages.append(f"⏸️ Esperando {e.seconds}s...")
-                                await asyncio.sleep(e.seconds)
-                            except RPCError as e:
-                                log_messages.append(f"❌ Error: {e}")
-                        
-                        tasks.append(send_cc(message, j))
-                    
-                    # Ejecutar ambas al mismo tiempo
-                    await asyncio.gather(*tasks)
-                    
-                    # Esperar entre lotes
-                    await asyncio.sleep(21)
-                
-                log_messages.append(f"🎉 Scrapper - Lote completado: 20/20")
-            else:
-                log_messages.append("⏳ Sin CCs en cola...")
-                await asyncio.sleep(20)
-        
-        except Exception as e:
-            log_messages.append(f"❌ Error: {e}")
-            await asyncio.sleep(20)
+        .header {
+            text-align: center;
+            padding: 30px 0;
+            border-bottom: 3px solid #FF1744;
+            margin-bottom: 30px;
+        }
 
-async def start_client():
-    """Inicia el cliente de Telegram"""
-    try:
-        log_messages.append("🚀 Iniciando Scrapper...")
-        await client.start()
-        log_messages.append("✅ Scrapper conectado correctamente")
-        
-        client.add_event_handler(response_handler, events.MessageEdited(chats='@Alphachekerbot'))
-        
-        await asyncio.gather(send_to_bot(), client.run_until_disconnected())
-    except Exception as e:
-        log_messages.append(f"❌ Error: {e}")
+        .header h1 {
+            font-size: 3em;
+            color: #FF1744;
+            text-shadow: 0 0 20px rgba(255, 23, 68, 0.5);
+            margin-bottom: 10px;
+        }
 
-def telethon_thread_fn():
-    """Ejecuta el cliente de Telegram en un hilo separado"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(start_client())
+        .header p {
+            color: #00FF00;
+            font-size: 1.2em;
+        }
 
-# ============ RUTAS FLASK ============
+        .auth-section {
+            background: rgba(28, 28, 28, 0.9);
+            border: 2px solid #FF1744;
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 8px 32px rgba(255, 23, 68, 0.3);
+        }
+
+        .auth-section h2 {
+            color: #FF1744;
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #00FF00;
+            font-weight: bold;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            background: #0D1117;
+            border: 2px solid #FF1744;
+            border-radius: 6px;
+            color: #ffffff;
+            font-size: 16px;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #00FF00;
+            box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+        }
+
+        .btn {
+            padding: 12px 30px;
+            background: #FF1744;
+            color: #ffffff;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+
+        .btn:hover {
+            background: #00FF00;
+            transform: scale(1.05);
+            box-shadow: 0 4px 15px rgba(0, 255, 0, 0.4);
+        }
+
+        .btn:disabled {
+            background: #555;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .panel {
+            background: rgba(28, 28, 28, 0.9);
+            border: 2px solid #FF1744;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        .panel h3 {
+            color: #FF1744;
+            margin-bottom: 15px;
+            font-size: 1.5em;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: rgba(28, 28, 28, 0.9);
+            border: 2px solid #FF1744;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .stat-card h4 {
+            color: #00FF00;
+            font-size: 0.9em;
+            margin-bottom: 10px;
+        }
+
+        .stat-card .value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #FF1744;
+        }
+
+        .log-container {
+            background: #0D1117;
+            border: 2px solid #FF1744;
+            border-radius: 8px;
+            padding: 15px;
+            height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+        }
+
+        .log-entry {
+            padding: 5px;
+            margin-bottom: 5px;
+            border-left: 3px solid #FF1744;
+            padding-left: 10px;
+        }
+
+        .log-entry.success { border-left-color: #00FF00; color: #00FF00; }
+        .log-entry.error { border-left-color: #FF0000; color: #FF0000; }
+        .log-entry.info { border-left-color: #00BFFF; color: #00BFFF; }
+        .log-entry.warning { border-left-color: #FFA500; color: #FFA500; }
+
+        .lives-list {
+            background: #0D1117;
+            border: 2px solid #00FF00;
+            border-radius: 8px;
+            padding: 15px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+        }
+
+        .live-item {
+            padding: 8px;
+            margin-bottom: 5px;
+            background: rgba(0, 255, 0, 0.1);
+            border-radius: 4px;
+            color: #00FF00;
+        }
+
+        .super-live-item {
+            padding: 8px;
+            margin-bottom: 5px;
+            background: rgba(255, 165, 0, 0.1);
+            border-radius: 4px;
+            color: #FFA500;
+        }
+
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+
+            .stats {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-indicator.online { background: #00FF00; }
+        .status-indicator.offline { background: #FF0000; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎮 TEAM REDCARDS</h1>
+            <p>Owner: @Neokotaro | TEAM-RDA</p>
+        </div>
+
+        <!-- Sección de Autenticación -->
+        <div class="auth-section" id="auth-section">
+            <h2>🔐 Autenticación Telegram</h2>
+            <div id="auth-status">
+                <span class="status-indicator" id="status-dot"></span>
+                <span id="status-text">Desconectado</span>
+            </div>
+
+            <div class="form-group" id="phone-group">
+                <label>📱 Número de Teléfono:</label>
+                <input type="text" id="phone" placeholder="+34612345678">
+                <button class="btn" onclick="sendCode()">📤 Enviar Código</button>
+            </div>
+
+            <div class="form-group" id="code-group" style="display:none;">
+                <label>🔐 Código de Verificación:</label>
+                <input type="text" id="code" placeholder="12345">
+                <button class="btn" onclick="verifyCode()">✅ Verificar</button>
+            </div>
+
+            <div class="form-group" id="password-group" style="display:none;">
+                <label>🔑 Contraseña 2FA (si aplica):</label>
+                <input type="password" id="password" placeholder="Contraseña">
+            </div>
+        </div>
+
+        <!-- Estadísticas -->
+        <div class="stats">
+            <div class="stat-card">
+                <h4>CHK CCS</h4>
+                <div class="value" id="stat-total">0</div>
+            </div>
+            <div class="stat-card">
+                <h4>LIVES</h4>
+                <div class="value" id="stat-lives" style="color:#00FF00">0</div>
+            </div>
+            <div class="stat-card">
+                <h4>SUPER LIVES</h4>
+                <div class="value" id="stat-super" style="color:#FFA500">0</div>
+            </div>
+            <div class="stat-card">
+                <h4>DEADS</h4>
+                <div class="value" id="stat-deads" style="color:#FF0000">0</div>
+            </div>
+        </div>
+
+        <!-- Grid Principal -->
+        <div class="grid">
+            <!-- Panel de Control -->
+            <div class="panel">
+                <h3>⚙️ Control de Checking</h3>
+
+                <div class="form-group">
+                    <label>Gateway:</label>
+                    <select id="gateway" style="width:100%; padding:12px; background:#0D1117; border:2px solid #FF1744; border-radius:6px; color:#fff;">
+                        <option>Paypal</option>
+                        <option>Stripe</option>
+                        <option>Braintree</option>
+                        <option>Adyen</option>
+                        <option>Chase</option>
+                        <option>MercadoPago</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>BIN:</label>
+                    <input type="text" id="bin" placeholder="438108">
+                </div>
+
+                <div class="form-group">
+                    <label>Cantidad:</label>
+                    <input type="number" id="cantidad" value="50" min="1" max="1000">
+                </div>
+
+                <button class="btn" onclick="startChecking()" id="start-btn">▶️ INICIAR CHECKING</button>
+                <button class="btn" onclick="stopChecking()" id="stop-btn" disabled>⏹️ DETENER</button>
+            </div>
+
+            <!-- Panel de Log -->
+            <div class="panel">
+                <h3>📝 Log en Tiempo Real</h3>
+                <div class="log-container" id="log-container"></div>
+                <button class="btn" onclick="clearLogs()" style="margin-top:10px;">🗑️ Limpiar Log</button>
+            </div>
+        </div>
+
+        <!-- Grid de Resultados -->
+        <div class="grid">
+            <!-- Super Lives -->
+            <div class="panel">
+                <h3>💎 Super Lives</h3>
+                <div class="lives-list" id="super-lives-list"></div>
+            </div>
+
+            <!-- Lives -->
+            <div class="panel">
+                <h3>✅ Lives</h3>
+                <div class="lives-list" id="lives-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Actualizar estadísticas cada 1 segundo
+        setInterval(updateStats, 1000);
+        setInterval(updateLogs, 1000);
+        setInterval(updateLives, 1000);
+        setInterval(checkAuthStatus, 3000);
+
+        async function checkAuthStatus() {
+            const response = await fetch('/check_auth');
+            const data = await response.json();
+
+            const statusDot = document.getElementById('status-dot');
+            const statusText = document.getElementById('status-text');
+
+            if (data.authenticated) {
+                statusDot.className = 'status-indicator online';
+                statusText.textContent = 'Conectado ✅';
+                document.getElementById('auth-section').style.display = 'none';
+            } else {
+                statusDot.className = 'status-indicator offline';
+                statusText.textContent = 'Desconectado ❌';
+            }
+        }
+
+        async function sendCode() {
+            const phone = document.getElementById('phone').value;
+
+            const response = await fetch('/auth/send_code', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({phone: phone})
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                document.getElementById('phone-group').style.display = 'none';
+                document.getElementById('code-group').style.display = 'block';
+                alert('✅ Código enviado! Revisa tu Telegram');
+            } else {
+                alert('❌ Error: ' + data.message);
+            }
+        }
+
+        async function verifyCode() {
+            const code = document.getElementById('code').value;
+            const password = document.getElementById('password').value;
+
+            const response = await fetch('/auth/verify_code', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({code: code, password: password})
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                alert('✅ ¡Autenticación exitosa!');
+                location.reload();
+            } else {
+                if (data.need_password) {
+                    document.getElementById('password-group').style.display = 'block';
+                }
+                alert('❌ Error: ' + data.message);
+            }
+        }
+
+        async function startChecking() {
+            const bin = document.getElementById('bin').value;
+            const cantidad = document.getElementById('cantidad').value;
+            const gateway = document.getElementById('gateway').value;
+
+            if (!bin) {
+                alert('❌ Ingresa un BIN');
+                return;
+            }
+
+            const response = await fetch('/checking/start', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({bin: bin, cantidad: cantidad, gateway: gateway})
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                document.getElementById('start-btn').disabled = true;
+                document.getElementById('stop-btn').disabled = false;
+            } else {
+                alert('❌ Error: ' + data.message);
+            }
+        }
+
+        async function stopChecking() {
+            await fetch('/checking/stop', {method: 'POST'});
+            document.getElementById('start-btn').disabled = false;
+            document.getElementById('stop-btn').disabled = true;
+        }
+
+        async function updateStats() {
+            const response = await fetch('/get_stats');
+            const data = await response.json();
+
+            document.getElementById('stat-total').textContent = data.total_chk;
+            document.getElementById('stat-lives').textContent = data.lives;
+            document.getElementById('stat-super').textContent = data.super_lives;
+            document.getElementById('stat-deads').textContent = data.deads;
+        }
+
+        async function updateLogs() {
+            const response = await fetch('/get_logs');
+            const data = await response.json();
+
+            const container = document.getElementById('log-container');
+            container.innerHTML = '';
+
+            data.logs.slice(-50).forEach(log => {
+                const entry = document.createElement('div');
+                entry.className = 'log-entry ' + log.type;
+                entry.textContent = `[${log.time}] ${log.message}`;
+                container.appendChild(entry);
+            });
+
+            container.scrollTop = container.scrollHeight;
+        }
+
+        async function updateLives() {
+            const response = await fetch('/get_lives');
+            const data = await response.json();
+
+            const superList = document.getElementById('super-lives-list');
+            const livesList = document.getElementById('lives-list');
+
+            superList.innerHTML = '';
+            data.super_lives.forEach(card => {
+                const item = document.createElement('div');
+                item.className = 'super-live-item';
+                item.textContent = '💎 ' + card;
+                superList.appendChild(item);
+            });
+
+            livesList.innerHTML = '';
+            data.lives.forEach(card => {
+                const item = document.createElement('div');
+                item.className = 'live-item';
+                item.textContent = '✅ ' + card;
+                livesList.appendChild(item);
+            });
+        }
+
+        function clearLogs() {
+            fetch('/clear_logs', {method: 'POST'});
+        }
+
+        // Cargar estado inicial
+        checkAuthStatus();
+        updateStats();
+        updateLogs();
+        updateLives();
+    </script>
+</body>
+</html>
+"""
+
+def add_log(message, log_type="info"):
+    """Agrega un log"""
+    logs.append({
+        "time": datetime.now().strftime("%H:%M:%S"),
+        "message": message,
+        "type": log_type
+    })
+    print(f"[{log_type.upper()}] {message}")
 
 @app.route('/')
 def index():
-    """Panel web principal"""
-    html = '''
-    <!DOCTYPE html>
-    <html lang="es">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>SCRAPPER TEAM REDCARDS</title>
-        <style>
-            * {
-                margin: 0;
-                padding: 0;
-                box-sizing: border-box;
-            }
-            body {
-                background: linear-gradient(135deg, #0a0e27 0%, #1a1a3e 50%, #2d1b3d 100%);
-                font-family: 'Arial Black', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                color: #fff;
-                min-height: 100vh;
-                padding: 20px;
-            }
-            .container {
-                max-width: 1400px;
-                margin: 0 auto;
-            }
-            .header {
-                text-align: center;
-                margin-bottom: 30px;
-                padding: 40px;
-                background: linear-gradient(135deg, rgba(255, 20, 20, 0.15) 0%, rgba(139, 0, 0, 0.1) 100%);
-                border-radius: 20px;
-                border: 3px solid #ff1414;
-                box-shadow: 0 0 40px rgba(255, 20, 20, 0.6), inset 0 0 30px rgba(255, 20, 20, 0.1);
-            }
-            .header h1 {
-                font-size: 3.5em;
-                margin-bottom: 10px;
-                color: #ff1414;
-                text-shadow: 0 0 20px rgba(255, 20, 20, 0.8), 0 0 40px rgba(255, 50, 50, 0.5);
-                letter-spacing: 2px;
-                font-weight: 900;
-            }
-            .header .subtitle {
-                font-size: 1em;
-                color: #ffaa00;
-                text-transform: uppercase;
-                letter-spacing: 3px;
-                font-weight: bold;
-            }
-            .stats {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-                gap: 20px;
-                margin-bottom: 30px;
-            }
-            .stat-box {
-                background: linear-gradient(135deg, rgba(255, 20, 20, 0.1) 0%, rgba(139, 0, 0, 0.05) 100%);
-                padding: 30px;
-                border-radius: 15px;
-                border: 2px solid #ff1414;
-                text-align: center;
-                backdrop-filter: blur(10px);
-                transition: all 0.3s ease;
-                box-shadow: 0 0 20px rgba(255, 20, 20, 0.3);
-            }
-            .stat-box:hover {
-                transform: translateY(-8px) scale(1.05);
-                box-shadow: 0 10px 40px rgba(255, 20, 20, 0.5);
-                border-color: #ffaa00;
-            }
-            .stat-box h3 {
-                color: #ffaa00;
-                margin-bottom: 15px;
-                font-size: 0.95em;
-                text-transform: uppercase;
-                letter-spacing: 1px;
-            }
-            .stat-box .number {
-                font-size: 4em;
-                font-weight: 900;
-                color: #ff1414;
-                text-shadow: 0 0 15px rgba(255, 20, 20, 0.6);
-            }
-            .main-content {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 20px;
-                margin-bottom: 30px;
-            }
-            .scrapper-section, .lives-section {
-                background: linear-gradient(135deg, rgba(255, 20, 20, 0.08) 0%, rgba(139, 0, 0, 0.03) 100%);
-                padding: 25px;
-                border-radius: 15px;
-                border: 2px solid #ff1414;
-                box-shadow: 0 0 15px rgba(255, 20, 20, 0.2);
-            }
-            .scrapper-section h2, .lives-section h2 {
-                margin-bottom: 20px;
-                color: #ffaa00;
-                font-size: 1.8em;
-                text-shadow: 0 0 10px rgba(255, 170, 0, 0.5);
-                letter-spacing: 1px;
-            }
-            .search-box {
-                margin-bottom: 15px;
-                display: flex;
-                gap: 10px;
-            }
-            .search-box input {
-                flex: 1;
-                padding: 12px 15px;
-                background: rgba(0, 0, 0, 0.3);
-                border: 2px solid #ff1414;
-                border-radius: 8px;
-                color: #fff;
-            }
-            .search-box input::placeholder {
-                color: rgba(255, 170, 0, 0.6);
-            }
-            .search-box input:focus {
-                outline: none;
-                border-color: #ffaa00;
-                box-shadow: 0 0 15px rgba(255, 170, 0, 0.5);
-            }
-            .search-box button {
-                padding: 12px 25px;
-                background: linear-gradient(135deg, #ff1414 0%, #cc0000 100%);
-                border: 2px solid #ffaa00;
-                border-radius: 8px;
-                color: white;
-                font-weight: bold;
-                cursor: pointer;
-                transition: all 0.2s ease;
-            }
-            .scrapper-container, .lives-container {
-                background: rgba(0, 0, 0, 0.5);
-                padding: 15px;
-                border-radius: 10px;
-                height: 500px;
-                overflow-y: auto;
-                font-family: 'Courier New', monospace;
-                font-size: 0.9em;
-                line-height: 1.7;
-            }
-            .log-entry {
-                padding: 8px 0;
-                border-bottom: 1px solid rgba(255, 20, 20, 0.2);
-            }
-            .log-entry.success {
-                color: #00ff00;
-                text-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
-            }
-            .log-entry.error {
-                color: #ff1414;
-            }
-            .log-entry.info {
-                color: #ffaa00;
-            }
-            .live-card {
-                background: linear-gradient(135deg, rgba(0, 255, 0, 0.05) 0%, rgba(50, 150, 50, 0.02) 100%);
-                padding: 15px;
-                margin-bottom: 10px;
-                border-radius: 10px;
-                border-left: 4px solid #00ff00;
-                border-bottom: 2px solid #ff1414;
-                transition: all 0.2s ease;
-            }
-            .live-card:hover {
-                transform: translateX(8px);
-                box-shadow: 0 0 20px rgba(0, 255, 0, 0.3);
-                border-left: 4px solid #ffaa00;
-            }
-            .live-card-header {
-                display: flex;
-                justify-content: space-between;
-                margin-bottom: 10px;
-                font-weight: bold;
-                color: #00ff00;
-            }
-            .live-card-info {
-                font-size: 0.9em;
-                color: #ffaa00;
-                margin: 5px 0;
-            }
-            .live-card-timestamp {
-                font-size: 0.75em;
-                color: #7f8c8d;
-                margin-top: 8px;
-            }
-            .scrapper-container::-webkit-scrollbar,
-            .lives-container::-webkit-scrollbar {
-                width: 10px;
-            }
-            .scrapper-container::-webkit-scrollbar-thumb,
-            .lives-container::-webkit-scrollbar-thumb {
-                background: linear-gradient(135deg, #ff1414 0%, #ffaa00 100%);
-                border-radius: 10px;
-            }
-            @media (max-width: 1200px) {
-                .main-content {
-                    grid-template-columns: 1fr;
-                }
-            }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1>🎮 SCRAPPER TEAM REDCARDS 🔴</h1>
-                <div class="subtitle">⚡ Elite Checker System ⚡</div>
-            </div>
-            
-            <div class="stats">
-                <div class="stat-box">
-                    <h3>✅ LIVES</h3>
-                    <div class="number" id="approved">{{ approved }}</div>
-                </div>
-                <div class="stat-box">
-                    <h3>❌ DECLINADAS</h3>
-                    <div class="number" id="declined">{{ declined }}</div>
-                </div>
-                <div class="stat-box">
-                    <h3>💎 GUARDADAS</h3>
-                    <div class="number" id="lives-count">0</div>
-                </div>
-            </div>
-            
-            <div class="main-content">
-                <div class="scrapper-section">
-                    <h2>🔄 SCRAPPER</h2>
-                    <div class="scrapper-container" id="scrapper">
-                        {{ log }}
-                    </div>
-                </div>
-                
-                <div class="lives-section">
-                    <h2>💎 LIVES ENCONTRADAS</h2>
-                    <div class="search-box">
-                        <input type="text" id="search-input" placeholder="🔍 Buscar LIVE...">
-                        <button onclick="searchLives()">🔎</button>
-                    </div>
-                    <div class="lives-container" id="lives">
-                        <div class="log-entry info">Esperando LIVES...</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <script>
-            let isSearching = false;
-            
-            function displayLives(lives, filterText = '') {
-                const livesContainer = document.getElementById('lives');
-                
-                if (!lives || lives.length === 0) {
-                    livesContainer.innerHTML = '<div class="log-entry info">No hay LIVES...</div>';
-                    return;
-                }
-                
-                let filtered = lives;
-                if (filterText) {
-                    filtered = lives.filter(live => 
-                        live.cc.toLowerCase().includes(filterText.toLowerCase()) ||
-                        live.bank.toLowerCase().includes(filterText.toLowerCase()) ||
-                        live.country.toLowerCase().includes(filterText.toLowerCase()) ||
-                        live.type.toLowerCase().includes(filterText.toLowerCase()) ||
-                        live.gate.toLowerCase().includes(filterText.toLowerCase())
-                    );
-                }
-                
-                if (filtered.length === 0) {
-                    livesContainer.innerHTML = '<div class="log-entry error">No encontrado</div>';
-                    return;
-                }
-                
-                livesContainer.innerHTML = filtered.map(live => `
-                    <div class="live-card">
-                        <div class="live-card-header">
-                            <span>💳 ${live.cc}</span>
-                            <span style="color: #00ff00;">✅</span>
-                        </div>
-                        <div class="live-card-info">🏦 ${live.bank}</div>
-                        <div class="live-card-info">🗺️ ${live.country}</div>
-                        <div class="live-card-info">💰 ${live.type}</div>
-                        <div class="live-card-info">💵 ${live.gate}</div>
-                        <div class="live-card-timestamp">🕐 ${live.timestamp}</div>
-                    </div>
-                `).join('');
-            }
-            
-            function searchLives() {
-                const searchText = document.getElementById('search-input').value;
-                isSearching = searchText.length > 0;
-                
-                fetch('/get_lives')
-                    .then(response => response.json())
-                    .then(data => {
-                        displayLives(data.lives, searchText);
-                    });
-            }
-            
-            function updateLogs() {
-                fetch('/get_logs')
-                    .then(response => response.json())
-                    .then(data => {
-                        document.getElementById('scrapper').innerHTML = data.log
-                            .split('\\n')
-                            .map(line => {
-                                let className = 'info';
-                                if (line.includes('✓') || line.includes('✅')) className = 'success';
-                                else if (line.includes('❌') || line.includes('Error')) className = 'error';
-                                return `<div class="log-entry ${className}">${line}</div>`;
-                            })
-                            .join('');
-                        
-                        document.getElementById('approved').textContent = data.approved;
-                        document.getElementById('declined').textContent = data.declined;
-                        
-                        const scrapper = document.getElementById('scrapper');
-                        scrapper.scrollTop = scrapper.scrollHeight;
-                    });
-                
-                if (!isSearching) {
-                    fetch('/get_lives')
-                        .then(response => response.json())
-                        .then(data => {
-                            document.getElementById('lives-count').textContent = data.lives.length;
-                            displayLives(data.lives);
-                            
-                            const lives = document.getElementById('lives');
-                            lives.scrollTop = lives.scrollHeight;
-                        });
-                }
-            }
-            
-            document.addEventListener('DOMContentLoaded', function() {
-                document.getElementById('search-input').addEventListener('keypress', function(e) {
-                    if (e.key === 'Enter') searchLives();
-                });
-                
-                setInterval(updateLogs, 3000);
-                updateLogs();
-            });
-        </script>
-    </body>
-    </html>
-    '''
-    return render_template_string(html, log='\n'.join(log_messages[-50:]), approved=approved_count, declined=declined_count)
+    """Página principal"""
+    return render_template_string(HTML_TEMPLATE)
+
+@app.route('/check_auth')
+def check_auth():
+    """Verifica estado de autenticación"""
+    global authenticated, client
+
+    # Verificar si existe sesión
+    session_path = Path(f"{SESSION_FILE}.session")
+
+    if session_path.exists() and not authenticated:
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            async def connect():
+                global client, authenticated
+                client = TelegramClient(SESSION_FILE, API_ID, API_HASH)
+                await client.connect()
+
+                if await client.is_user_authorized():
+                    authenticated = True
+                    add_log("✅ Conectado con sesión existente", "success")
+                    return True
+                return False
+
+            result = loop.run_until_complete(connect())
+
+        except Exception as e:
+            add_log(f"❌ Error en conexión: {str(e)}", "error")
+
+    return jsonify({"authenticated": authenticated})
+
+@app.route('/auth/send_code', methods=['POST'])
+def send_code():
+    """Envía código de verificación"""
+    global client
+
+    data = request.json
+    phone = data.get('phone', '')
+
+    if not phone.startswith('+'):
+        phone = '+' + phone
+
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        async def send():
+            global client
+            client = TelegramClient(SESSION_FILE, API_ID, API_HASH)
+            await client.connect()
+            result = await client.send_code_request(phone)
+            session['phone'] = phone
+            session['phone_code_hash'] = result.phone_code_hash
+            add_log(f"✅ Código enviado a {phone}", "success")
+            return True
+
+        result = loop.run_until_complete(send())
+
+        return jsonify({"success": True})
+
+    except Exception as e:
+        add_log(f"❌ Error: {str(e)}", "error")
+        return jsonify({"success": False, "message": str(e)})
+
+@app.route('/auth/verify_code', methods=['POST'])
+def verify_code():
+    """Verifica código de autenticación"""
+    global client, authenticated
+
+    data = request.json
+    code = data.get('code', '')
+    password = data.get('password', '')
+
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        async def verify():
+            global authenticated
+
+            phone = session.get('phone')
+            phone_code_hash = session.get('phone_code_hash')
+
+            try:
+                await client.sign_in(phone, code, phone_code_hash=phone_code_hash)
+                authenticated = True
+                add_log("✅ Autenticación exitosa", "success")
+                return {"success": True, "need_password": False}
+
+            except SessionPasswordNeededError:
+                if password:
+                    await client.sign_in(password=password)
+                    authenticated = True
+                    add_log("✅ Autenticación exitosa con 2FA", "success")
+                    return {"success": True, "need_password": False}
+                else:
+                    return {"success": False, "need_password": True, "message": "Se requiere contraseña 2FA"}
+
+        result = loop.run_until_complete(verify())
+        return jsonify(result)
+
+    except Exception as e:
+        add_log(f"❌ Error: {str(e)}", "error")
+        return jsonify({"success": False, "message": str(e)})
+
+@app.route('/checking/start', methods=['POST'])
+def start_checking():
+    """Inicia checking"""
+    global checking_active, stats
+
+    if not authenticated:
+        return jsonify({"success": False, "message": "Debes autenticarte primero"})
+
+    data = request.json
+    bin_code = data.get('bin', '')
+    cantidad = int(data.get('cantidad', 50))
+    gateway = data.get('gateway', 'Paypal')
+
+    checking_active = True
+    add_log(f"🚀 Iniciando checking con {cantidad} CCS", "info")
+    add_log(f"BIN: {bin_code} | Gateway: {gateway}", "info")
+
+    # Simular checking
+    import threading
+
+    def do_checking():
+        global checking_active, stats, lives, super_lives
+
+        for i in range(cantidad):
+            if not checking_active:
+                break
+
+            # Generar tarjeta
+            cuerpo = ''.join(str(random.randint(0, 9)) for _ in range(10))
+            fecha = f"{random.randint(1,12):02d}/{random.randint(25,35):02d}"
+            cvv = str(random.randint(100, 999))
+            tarjeta = f"{bin_code}{cuerpo}|{fecha}|{cvv}"
+
+            # Simular resultado
+            result = random.choices(
+                ["live", "super_live", "dead"],
+                weights=[15, 5, 80]
+            )[0]
+
+            stats["total_chk"] += 1
+
+            if result == "live":
+                stats["lives"] += 1
+                lives.append(tarjeta)
+                add_log(f"✅ LIVE: {tarjeta}", "success")
+            elif result == "super_live":
+                stats["super_lives"] += 1
+                super_lives.append(tarjeta)
+                add_log(f"💎 SUPER LIVE: {tarjeta}", "warning")
+            else:
+                stats["deads"] += 1
+
+            time.sleep(0.3)
+
+        checking_active = False
+        add_log("✅ Checking completado", "success")
+
+    thread = threading.Thread(target=do_checking)
+    thread.start()
+
+    return jsonify({"success": True})
+
+@app.route('/checking/stop', methods=['POST'])
+def stop_checking():
+    """Detiene checking"""
+    global checking_active
+    checking_active = False
+    add_log("⏹️ Checking detenido", "warning")
+    return jsonify({"success": True})
+
+@app.route('/get_stats')
+def get_stats():
+    """Obtiene estadísticas"""
+    return jsonify(stats)
 
 @app.route('/get_logs')
 def get_logs():
-    """Obtiene los logs actuales en JSON"""
-    return jsonify({
-        "log": '\n'.join(log_messages[-50:]),
-        "approved": approved_count,
-        "declined": declined_count
-    })
+    """Obtiene logs"""
+    return jsonify({"logs": logs})
 
 @app.route('/get_lives')
 def get_lives():
-    """Obtiene la lista de LIVES (CCs aprobadas)"""
+    """Obtiene lives"""
     return jsonify({
-        "lives": lives_list
+        "lives": lives,
+        "super_lives": super_lives
     })
 
-@app.route('/health')
-def health():
-    """Health check para Railway"""
-    return jsonify({"status": "ok", "approved": approved_count, "declined": declined_count, "lives": len(lives_list)})
-
-# ============ INICIO ============
+@app.route('/clear_logs', methods=['POST'])
+def clear_logs():
+    """Limpia logs"""
+    global logs
+    logs = []
+    return jsonify({"success": True})
 
 if __name__ == '__main__':
-    # Cargar LIVES guardadas
-    load_lives_from_file()
-    
-    # Iniciar Telethon
-    telethon_thread = threading.Thread(target=telethon_thread_fn, daemon=True)
-    telethon_thread.start()
-    time.sleep(2)
-    
-    # Iniciar Flask
-    app.run('0.0.0.0', PORT, debug=False)
+    print("🚀 TEAM REDCARDS Web Interface")
+    print("Owner: @Neokotaro - TEAM-RDA")
+    print("")
+    print("🌐 Servidor iniciando...")
+    print("📍 Accede a: http://0.0.0.0:8080")
+    print("")
+
+    app.run(host='0.0.0.0', port=8080, debug=False)
